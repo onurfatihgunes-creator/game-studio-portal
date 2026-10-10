@@ -7,7 +7,7 @@ import type { RepoSummary } from "@/lib/github/app";
 import { DEV_STATUSES, DEV_STATUS_LABEL, type DevStatus, type GameType } from "@/lib/types";
 
 type Detect = "pending" | "yes" | "no" | "error";
-type Phase = "idle" | "queued" | "importing" | "done" | "duplicate" | "error";
+type Phase = "idle" | "queued" | "importing" | "done" | "duplicate" | "rejected" | "error";
 type Row = {
   repo: RepoSummary;
   detect: Detect;
@@ -92,11 +92,12 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
   const counts = {
     done: all.filter((r) => r.phase === "done").length,
     duplicate: all.filter((r) => r.phase === "duplicate").length,
+    rejected: all.filter((r) => r.phase === "rejected").length,
     error: all.filter((r) => r.phase === "error").length,
     active: all.filter((r) => r.phase === "queued" || r.phase === "importing").length,
   };
   const editable = (r: Row) => !importing || r.phase === "idle" || r.phase === "error";
-  const lockedRow = (r: Row) => r.phase === "done" || r.phase === "duplicate" || r.phase === "importing" || r.phase === "queued";
+  const lockedRow = (r: Row) => r.phase === "done" || r.phase === "duplicate" || r.phase === "rejected" || r.phase === "importing" || r.phase === "queued";
 
   function setForSelected(p: Partial<Pick<Row, "type" | "status">>) {
     setRows((cur) => Object.fromEntries(Object.entries(cur).map(([k, r]) => [k, r.selected && !lockedRow(r) ? { ...r, ...p } : r])));
@@ -116,12 +117,13 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
     await pool(ids, IMPORT_CONCURRENCY, async (id) => {
       patch(id, { phase: "importing" });
       const row = rowsRef.current[id]; // values as edited when this row's turn came
-      type Res = { ok: true; id: string } | { ok: false; error: string; code?: string };
+      type Res = { ok: true; id: string } | { ok: false; error: string; code?: "duplicate" | "rejected" | "retryable" };
       const res = await post<Res>("/api/games/import", {
         installationId: row.repo.installationId, owner: row.repo.owner, repo: row.repo.name, name: row.name, type: row.type, devStatus: row.status,
       }).catch((e: Error): Res => ({ ok: false, error: e.message }));
       if (res.ok) patch(id, { phase: "done", gameId: res.id, selected: false });
       else if (res.code === "duplicate") patch(id, { phase: "duplicate", error: res.error, selected: false });
+      else if (res.code === "rejected") patch(id, { phase: "rejected", error: res.error, selected: false });
       else patch(id, { phase: "error", error: res.error });
     });
     setImporting(false);
@@ -214,6 +216,7 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
                   {(r.phase === "queued" || r.phase === "importing") && <Badge tone="info">{r.phase === "queued" ? "Queued" : "Importing…"}</Badge>}
                   {r.phase === "done" && <><Badge tone="good">Added</Badge> <Link className="ml-2 underline" href={`/games/${r.gameId}`}>Open</Link></>}
                   {r.phase === "duplicate" && <Badge tone="warn">Already connected</Badge>}
+                  {r.phase === "rejected" && <span className="text-muted"><Badge tone="warn">Not imported</Badge> <span className="ml-1">{r.error}</span></span>}
                   {r.phase === "error" && <span className="text-[var(--bad-fg)]"><Badge tone="bad">Failed</Badge> <span className="ml-1">{r.error}</span></span>}
                 </div>
               )}
@@ -224,11 +227,11 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
 
       <div className="sticky bottom-16 z-[5] mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-3 md:bottom-4">
         <button className="btn btn-primary" onClick={() => runImport(selectedIds)} disabled={detecting || importing || selectedIds.length === 0}>
-          {importing ? `Importing… ${counts.done + counts.duplicate + counts.error}/${counts.done + counts.duplicate + counts.error + counts.active}` : `Import ${selectedIds.length} selected`}
+          {importing ? `Importing… ${counts.done + counts.duplicate + counts.rejected + counts.error}/${counts.done + counts.duplicate + counts.rejected + counts.error + counts.active}` : `Import ${selectedIds.length} selected`}
         </button>
         {counts.error > 0 && !importing && <button className="btn btn-primary" onClick={retryFailed}>Retry {counts.error} failed</button>}
         <span className="text-sm text-muted">
-          {counts.done > 0 && `${counts.done} added`}{counts.duplicate > 0 && ` · ${counts.duplicate} already connected`}{counts.error > 0 && ` · ${counts.error} failed`}
+          {counts.done > 0 && `${counts.done} added`}{counts.duplicate > 0 && ` · ${counts.duplicate} already connected`}{counts.rejected > 0 && ` · ${counts.rejected} not imported`}{counts.error > 0 && ` · ${counts.error} failed`}
         </span>
         {counts.done > 0 && !importing && <Link href="/games" className="btn ml-auto">View games</Link>}
       </div>

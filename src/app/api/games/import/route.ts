@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { apiGuard, errorMessage } from "@/lib/api";
-import { addGame } from "@/lib/game-sync";
-import { DuplicateGameError } from "@/lib/games";
+import { addGame, classifyImportError } from "@/lib/game-sync";
 
 /** Add one game (called repeatedly, a few at a time, by the bulk import page). */
 export async function POST(request: NextRequest) {
@@ -20,7 +19,8 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ ok: true, id });
   } catch (e) {
-    const duplicate = e instanceof DuplicateGameError;
-    return NextResponse.json({ ok: false, error: errorMessage(e), code: duplicate ? "duplicate" : undefined }, { status: duplicate ? 409 : 400 });
+    const kind = classifyImportError(e);
+    const status = kind === "duplicate" ? 409 : kind === "rejected" ? 422 : 400;
+    return NextResponse.json({ ok: false, error: errorMessage(e), code: kind }, { status });
   }
 }

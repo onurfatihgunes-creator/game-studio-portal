@@ -2,18 +2,41 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireGitHubConfig } from "./github/config";
 import { scanRepository } from "./github/scan";
-import { applyScan, getGame, insertGame, recordSyncError } from "./games";
+import { GitHubError } from "./github/app";
+import { applyScan, DuplicateGameError, getGame, insertGame, recordSyncError } from "./games";
 import { DEV_STATUSES, type DevStatus, type GameType } from "./types";
 
 /** Core add/refresh logic shared by the server actions (single add) and the /api/games routes (bulk). */
+
+/** A failure that retrying cannot fix (e.g. the repository has no Unity project). */
+export class PermanentImportError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PermanentImportError";
+  }
+}
+
+export type ImportFailure = "duplicate" | "rejected" | "retryable";
+
+/**
+ * duplicate  → already connected (not an error for the user)
+ * rejected   → permanent: retrying changes nothing (no Unity project, invalid repo, repo not found/accessible)
+ * retryable  → possibly temporary: GitHub 5xx / rate limit / network / database hiccup
+ */
+export function classifyImportError(e: unknown): ImportFailure {
+  if (e instanceof DuplicateGameError) return "duplicate";
+  if (e instanceof PermanentImportError) return "rejected";
+  if (e instanceof GitHubError && (e.status === 404 || e.status === 401)) return "rejected";
+  return "retryable";
+}
 
 const NAME_RE = /^[A-Za-z0-9_.-]{1,100}$/;
 
 export function parseRepoRef(installationId: unknown, owner: unknown, repo: unknown) {
   const id = Number(installationId);
-  if (!Number.isInteger(id) || id <= 0) throw new Error("Invalid installation");
+  if (!Number.isInteger(id) || id <= 0) throw new PermanentImportError("Invalid installation");
   if (typeof owner !== "string" || typeof repo !== "string" || !NAME_RE.test(owner) || !NAME_RE.test(repo)) {
-    throw new Error("Invalid repository");
+    throw new PermanentImportError("Invalid repository");
   }
   return { id, owner, repo };
 }
@@ -37,7 +60,7 @@ export async function addGame(db: SupabaseClient, input: AddGameInput): Promise<
 
   const scan = await scanRepository(requireGitHubConfig(), ref.id, ref.owner, ref.repo);
   if (input.requireUnity && !scan.unity.detected) {
-    throw new Error("No Unity project found (no ProjectSettings/ProjectVersion.txt), so it was not imported. If this repository really is a game, add it with “Connect one game”.");
+    throw new PermanentImportError("No Unity project found (no ProjectSettings/ProjectVersion.txt), so it was not imported. If this repository really is a game, add it with “Connect one game”.");
   }
   return insertGame(db, scan, { name, type: input.type, devStatus: input.devStatus });
 }

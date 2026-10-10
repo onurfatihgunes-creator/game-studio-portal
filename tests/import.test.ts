@@ -2,7 +2,8 @@ import { generateKeyPairSync } from "node:crypto";
 import { NextRequest } from "next/server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { isSameOrigin } from "@/lib/api";
-import { addGame, parseRepoRef } from "@/lib/game-sync";
+import { addGame, classifyImportError, parseRepoRef, PermanentImportError } from "@/lib/game-sync";
+import { GitHubError } from "@/lib/github/app";
 import { DuplicateGameError, insertGame } from "@/lib/games";
 import { quickUnityCheck, scanRepository } from "@/lib/github/scan";
 import type { ScanResult } from "@/lib/github/types";
@@ -117,6 +118,8 @@ describe("bulk import guard (requireUnity)", () => {
 
   it("refuses a repository with no Unity project and writes nothing", async () => {
     vi.mocked(scanRepository).mockResolvedValueOnce(scanOf(false));
+    await expect(addGame(untouchedDb, input)).rejects.toBeInstanceOf(PermanentImportError);
+    vi.mocked(scanRepository).mockResolvedValueOnce(scanOf(false));
     await expect(addGame(untouchedDb, input)).rejects.toThrow(/No Unity project found/);
   });
   it("the single-game wizard path stays permissive (no requireUnity)", async () => {
@@ -128,5 +131,25 @@ describe("bulk import guard (requireUnity)", () => {
     vi.mocked(scanRepository).mockResolvedValueOnce(scanOf(true));
     const db: any = { from: () => ({ insert: () => ({ select: () => ({ single: async () => ({ data: { id: "ok" }, error: null }) }) }), delete: () => ({ eq: async () => ({ error: null }) }) }) };
     await expect(addGame(db, input)).resolves.toBe("ok");
+  });
+});
+
+describe("retry classification", () => {
+  it("permanent failures are not retryable", () => {
+    expect(classifyImportError(new PermanentImportError("No Unity project found"))).toBe("rejected");
+    expect(() => parseRepoRef(1, "o/..", "r")).toThrow(PermanentImportError);
+    expect(classifyImportError(new GitHubError("not found", 404, "/x"))).toBe("rejected");
+    expect(classifyImportError(new GitHubError("bad credentials", 401, "/x"))).toBe("rejected");
+  });
+  it("duplicates are reported as such", () => {
+    expect(classifyImportError(new DuplicateGameError("o/r"))).toBe("duplicate");
+  });
+  it("temporary failures stay retryable", () => {
+    expect(classifyImportError(new GitHubError("server error", 500, "/x"))).toBe("retryable");
+    expect(classifyImportError(new GitHubError("rate limited", 403, "/x"))).toBe("retryable");
+    expect(classifyImportError(new Error("fetch failed"))).toBe("retryable");
+  });
+  it("name/type/status validation stays retryable (the user can edit and resend)", () => {
+    expect(classifyImportError(new Error("Enter a game name (max 120 characters)."))).toBe("retryable");
   });
 });
