@@ -18,7 +18,11 @@ export function parseRepoRef(installationId: unknown, owner: unknown, repo: unkn
   return { id, owner, repo };
 }
 
-export type AddGameInput = { installationId: number; owner: string; repo: string; name: string; type: GameType; devStatus: DevStatus };
+export type AddGameInput = {
+  installationId: number; owner: string; repo: string; name: string; type: GameType; devStatus: DevStatus;
+  /** Bulk import sets this: refuse repositories where the scan finds no Unity project (e.g. a shared engine repo). */
+  requireUnity?: boolean;
+};
 
 /**
  * Re-scans on the server (never trusts browser-supplied scan data), then inserts.
@@ -32,6 +36,9 @@ export async function addGame(db: SupabaseClient, input: AddGameInput): Promise<
   if (!DEV_STATUSES.includes(input.devStatus)) throw new Error("Choose a development status.");
 
   const scan = await scanRepository(requireGitHubConfig(), ref.id, ref.owner, ref.repo);
+  if (input.requireUnity && !scan.unity.detected) {
+    throw new Error("No Unity project found (no ProjectSettings/ProjectVersion.txt), so it was not imported. If this repository really is a game, add it with “Connect one game”.");
+  }
   return insertGame(db, scan, { name, type: input.type, devStatus: input.devStatus });
 }
 

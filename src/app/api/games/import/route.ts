@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
       name: body.name,
       type: body.type,
       devStatus: body.devStatus,
+      requireUnity: true, // bulk import only adds confirmed Unity projects
     });
     return NextResponse.json({ ok: true, id });
   } catch (e) {

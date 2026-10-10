@@ -47,7 +47,6 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState("");
   const [importing, setImporting] = useState(false);
-  const [detecting, setDetecting] = useState(false);
   const started = useRef(false);
   const rowsRef = useRef(rows);
   rowsRef.current = rows; // latest edits, read at send time
@@ -56,7 +55,7 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
 
   // ── Discovery: read-only, batches of 10 repos, 3 batches in flight ──
   const detect = useCallback(async (list: RepoSummary[]) => {
-    setDetecting(true);
+    for (const r of list) patch(r.id, { detect: "pending", detectError: undefined });
     const batches: RepoSummary[][] = [];
     for (let i = 0; i < list.length; i += DETECT_BATCH) batches.push(list.slice(i, i + DETECT_BATCH));
     await pool(batches, DETECT_CONCURRENCY, async (batch) => {
@@ -66,10 +65,9 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
         if (!res.ok) { patch(r.id, { detect: "error", detectError: res.error }); continue; }
         const hit = res.results.find((x) => x.owner === r.owner && x.repo === r.name);
         if (!hit || hit.unity === null) patch(r.id, { detect: "error", detectError: hit?.error ?? "No result" });
-        else patch(r.id, { detect: hit.unity ? "yes" : "no", detectError: undefined, selected: hit.unity && !r.archived });
+        else patch(r.id, { detect: hit.unity ? "yes" : "no", detectError: undefined });
       }
     });
-    setDetecting(false);
   }, [patch]);
 
   useEffect(() => {
@@ -83,13 +81,14 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
     const f = filter.trim().toLowerCase();
     if (f && !r.repo.fullName.toLowerCase().includes(f) && !r.name.toLowerCase().includes(f)) return false;
     if (showAll) return true;
-    return r.detect === "yes" || r.detect === "pending" || r.phase !== "idle"; // hide confirmed non-Unity unless "show all"
+    return r.detect === "yes" || r.phase !== "idle"; // default: confirmed Unity repositories only
   });
 
   const checked = all.filter((r) => r.detect !== "pending").length;
+  const detecting = checked < all.length; // derived from the rows, so the first render is already "loading"
   const unityCount = all.filter((r) => r.detect === "yes").length;
   const failedDetect = all.filter((r) => r.detect === "error");
-  const selectedIds = all.filter((r) => r.selected && (r.phase === "idle" || r.phase === "error")).map((r) => r.repo.id);
+  const selectedIds = all.filter((r) => r.selected && r.phase === "idle").map((r) => r.repo.id);
   const counts = {
     done: all.filter((r) => r.phase === "done").length,
     duplicate: all.filter((r) => r.phase === "duplicate").length,
@@ -110,8 +109,7 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
     });
   }
 
-  async function runImport() {
-    const ids = [...selectedIds];
+  async function runImport(ids: number[]) {
     if (!ids.length) return;
     setImporting(true);
     for (const id of ids) patch(id, { phase: "queued", error: undefined });
@@ -129,21 +127,30 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
     setImporting(false);
   }
 
-  const retryFailed = () => {
-    for (const r of all) if (r.phase === "error") patch(r.repo.id, { selected: true });
-    void runImport();
-  };
+  const retryFailed = () => void runImport(all.filter((r) => r.phase === "error").map((r) => r.repo.id));
 
   return (
     <div>
-      <div className="card mb-4 p-4 text-sm">
-        <p>
-          {detecting ? <>Checking repositories for Unity projects… <strong>{checked}/{all.length}</strong></> : <><strong>{unityCount}</strong> Unity project{unityCount === 1 ? "" : "s"} found in {all.length} repositories.</>}
-          {alreadyConnected > 0 && <span className="text-muted"> {alreadyConnected} already connected (hidden).</span>}
-        </p>
-        <p className="mt-1 text-xs text-muted">Detection looks for a <code>ProjectSettings</code> folder at the repository root (read-only). Unity projects in subfolders need “Show all repositories”; the import scan still finds them.</p>
-        {failedDetect.length > 0 && !detecting && (
-          <p className="mt-2 text-[var(--bad-fg)]">{failedDetect.length} repositor{failedDetect.length === 1 ? "y" : "ies"} could not be checked. <button className="underline" onClick={() => detect(failedDetect.map((r) => r.repo))}>Re-check</button></p>
+      <div className="card mb-4 p-4 text-sm" aria-live="polite">
+        {detecting ? (
+          <>
+            <p className="font-medium">Checking {all.length} repositories for Unity projects…</p>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-valuemin={0} aria-valuemax={all.length} aria-valuenow={checked}>
+              <div className="h-full bg-accent transition-all" style={{ width: `${(checked / Math.max(all.length, 1)) * 100}%` }} />
+            </div>
+            <p className="mt-1.5 text-xs text-muted">{checked} of {all.length} checked. Read-only; nothing is imported.</p>
+          </>
+        ) : (
+          <>
+            <p>
+              <strong>{unityCount}</strong> confirmed Unity project{unityCount === 1 ? "" : "s"} found in {all.length} repositories.
+              {alreadyConnected > 0 && <span className="text-muted"> {alreadyConnected} already connected (hidden).</span>}
+            </p>
+            <p className="mt-1 text-xs text-muted">A repository counts as a Unity game only if it has a <code>ProjectSettings</code> folder at its root. Other repositories (engines, tools, websites) stay hidden unless “Show all repositories” is on. Nothing is selected or imported until you choose.</p>
+            {failedDetect.length > 0 && (
+              <p className="mt-2 text-[var(--bad-fg)]">{failedDetect.length} repositor{failedDetect.length === 1 ? "y" : "ies"} could not be checked. <button className="underline" onClick={() => detect(failedDetect.map((r) => r.repo))}>Re-check</button></p>
+            )}
+          </>
         )}
       </div>
 
@@ -151,23 +158,35 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
         <input className="input max-w-xs" placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter repositories" />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> Show all repositories</label>
         <span className="ml-auto flex gap-2">
-          <button className="btn" onClick={() => selectVisible(true)} disabled={importing}>Select all</button>
-          <button className="btn" onClick={() => selectVisible(false)} disabled={importing}>None</button>
+          <button className="btn" onClick={() => selectVisible(true)} disabled={importing || detecting}>Select all</button>
+          <button className="btn" onClick={() => selectVisible(false)} disabled={importing || detecting}>None</button>
         </span>
       </div>
 
       <div className="card mb-3 flex flex-wrap items-center gap-3 p-3 text-sm">
         <span className="text-muted">Apply to selected:</span>
-        <select className="input w-auto" aria-label="Set type for selected" defaultValue="" onChange={(e) => { if (e.target.value) setForSelected({ type: e.target.value as GameType }); e.target.value = ""; }} disabled={importing}>
+        <select className="input w-auto" aria-label="Set type for selected" defaultValue="" onChange={(e) => { if (e.target.value) setForSelected({ type: e.target.value as GameType }); e.target.value = ""; }} disabled={importing || detecting}>
           <option value="">Type…</option><option value="mini">Mini</option><option value="premium">Premium</option>
         </select>
-        <select className="input w-auto" aria-label="Set status for selected" defaultValue="" onChange={(e) => { if (e.target.value) setForSelected({ status: e.target.value as DevStatus }); e.target.value = ""; }} disabled={importing}>
+        <select className="input w-auto" aria-label="Set status for selected" defaultValue="" onChange={(e) => { if (e.target.value) setForSelected({ status: e.target.value as DevStatus }); e.target.value = ""; }} disabled={importing || detecting}>
           <option value="">Status…</option>{DEV_STATUSES.map((s) => <option key={s} value={s}>{DEV_STATUS_LABEL[s]}</option>)}
         </select>
       </div>
 
       {visible.length === 0 ? (
-        <p className="card px-4 py-10 text-center text-sm text-muted">{detecting ? "Checking…" : "No Unity repositories found. Try “Show all repositories”."}</p>
+        detecting ? (
+          <ul className="card divide-y divide-line" aria-hidden>
+            {[0, 1, 2].map((i) => (
+              <li key={i} className="flex animate-pulse items-center gap-3 px-3 py-4">
+                <span className="h-4 w-4 rounded bg-surface-2" />
+                <span className="h-4 flex-1 rounded bg-surface-2" />
+                <span className="hidden h-8 w-28 rounded bg-surface-2 sm:block" />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="card px-4 py-10 text-center text-sm text-muted">No confirmed Unity game repositories to import. Turn on “Show all repositories” to look further.</p>
+        )
       ) : (
         <ul className="card divide-y divide-line">
           {visible.map((r) => (
@@ -204,10 +223,10 @@ export function ImportClient({ repos, alreadyConnected }: { repos: RepoSummary[]
       )}
 
       <div className="sticky bottom-16 z-[5] mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-3 md:bottom-4">
-        <button className="btn btn-primary" onClick={runImport} disabled={importing || selectedIds.length === 0}>
+        <button className="btn btn-primary" onClick={() => runImport(selectedIds)} disabled={detecting || importing || selectedIds.length === 0}>
           {importing ? `Importing… ${counts.done + counts.duplicate + counts.error}/${counts.done + counts.duplicate + counts.error + counts.active}` : `Import ${selectedIds.length} selected`}
         </button>
-        {counts.error > 0 && !importing && <button className="btn" onClick={retryFailed}>Retry {counts.error} failed</button>}
+        {counts.error > 0 && !importing && <button className="btn btn-primary" onClick={retryFailed}>Retry {counts.error} failed</button>}
         <span className="text-sm text-muted">
           {counts.done > 0 && `${counts.done} added`}{counts.duplicate > 0 && ` · ${counts.duplicate} already connected`}{counts.error > 0 && ` · ${counts.error} failed`}
         </span>

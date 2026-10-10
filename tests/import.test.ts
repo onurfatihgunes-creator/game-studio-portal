@@ -2,11 +2,12 @@ import { generateKeyPairSync } from "node:crypto";
 import { NextRequest } from "next/server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { isSameOrigin } from "@/lib/api";
-import { parseRepoRef } from "@/lib/game-sync";
+import { addGame, parseRepoRef } from "@/lib/game-sync";
 import { DuplicateGameError, insertGame } from "@/lib/games";
-import { quickUnityCheck } from "@/lib/github/scan";
+import { quickUnityCheck, scanRepository } from "@/lib/github/scan";
 import type { ScanResult } from "@/lib/github/types";
 
+vi.mock("@/lib/github/scan", async (orig) => ({ ...(await orig<typeof import("@/lib/github/scan")>()), scanRepository: vi.fn() }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: () => {} }) }));
 
 let pem: string;
@@ -102,4 +103,30 @@ describe("/api/games routes are protected", () => {
       expect(await status({ origin: "http://localhost:3000", "content-type": "application/json" })).toBe(401); // no session
     });
   }
+});
+
+describe("bulk import guard (requireUnity)", () => {
+  const scanOf = (detected: boolean) => ({
+    scannedAt: new Date().toISOString(),
+    repo: { id: 77, installationId: 1, owner: "o", name: "unity-merge-engine", fullName: "o/unity-merge-engine", htmlUrl: "u", description: null, defaultBranch: "main", isPrivate: true, isArchived: false, pushedAt: null },
+    latestCommit: null, unity: { detected, version: detected ? "6000.0.0f1" : null, projectPath: detected ? "" : null, note: null },
+    docs: [], monetization: { checked: false }, workflows: [],
+  }) satisfies ScanResult;
+  const input = { installationId: 1, owner: "o", repo: "unity-merge-engine", name: "Engine", type: "mini", devStatus: "prototype", requireUnity: true } as const;
+  const untouchedDb: any = { from: () => { throw new Error("database must not be touched"); } };
+
+  it("refuses a repository with no Unity project and writes nothing", async () => {
+    vi.mocked(scanRepository).mockResolvedValueOnce(scanOf(false));
+    await expect(addGame(untouchedDb, input)).rejects.toThrow(/No Unity project found/);
+  });
+  it("the single-game wizard path stays permissive (no requireUnity)", async () => {
+    vi.mocked(scanRepository).mockResolvedValueOnce(scanOf(false));
+    const db: any = { from: () => ({ insert: () => ({ select: () => ({ single: async () => ({ data: { id: "new" }, error: null }) }) }), delete: () => ({ eq: async () => ({ error: null }) }) }) };
+    await expect(addGame(db, { ...input, requireUnity: false })).resolves.toBe("new");
+  });
+  it("accepts a confirmed Unity project", async () => {
+    vi.mocked(scanRepository).mockResolvedValueOnce(scanOf(true));
+    const db: any = { from: () => ({ insert: () => ({ select: () => ({ single: async () => ({ data: { id: "ok" }, error: null }) }) }), delete: () => ({ eq: async () => ({ error: null }) }) }) };
+    await expect(addGame(db, input)).resolves.toBe("ok");
+  });
 });
