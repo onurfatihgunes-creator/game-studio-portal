@@ -1,0 +1,62 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f1f2f5;
+  --line: #e4e6eb;
+  --fg: #11141a;
+  --muted: #667085;
+  --accent: #4338ca;
+  --accent-fg: #ffffff;
+  --good-bg: #dcfce7; --good-fg: #166534;
+  --bad-bg: #fee2e2;  --bad-fg: #991b1b;
+  --warn-bg: #fef3c7; --warn-fg: #92400e;
+  --info-bg: #dbeafe; --info-fg: #1e40af;
+  --mute-bg: #eceef2; --mute-fg: #566074;
+}
+.dark {
+  --bg: #0c0e12;
+  --surface: #14171d;
+  --surface-2: #1b1f27;
+  --line: #262b35;
+  --fg: #e8eaef;
+  --muted: #98a2b3;
+  --accent: #8b8cf8;
+  --accent-fg: #0c0e12;
+  --good-bg: #12301f; --good-fg: #86efac;
+  --bad-bg: #3a1618;  --bad-fg: #fca5a5;
+  --warn-bg: #3a2c0d; --warn-fg: #fcd34d;
+  --info-bg: #14264a; --info-fg: #93c5fd;
+  --mute-bg: #20242d; --mute-fg: #a4adbd;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html { color-scheme: light; }
+html.dark { color-scheme: dark; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@layer components {
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; border-radius: .5rem; padding: .45rem .8rem; font-size: .875rem; font-weight: 500; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; transition: background .12s; }
+.btn:hover:not(:disabled) { background: var(--surface-2); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.btn-primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+.btn-danger { color: var(--bad-fg); }
+.input { width: 100%; border-radius: .5rem; border: 1px solid var(--line); background: var(--surface); padding: .5rem .7rem; font-size: .9rem; color: var(--fg); }
+.card { border-radius: .75rem; border: 1px solid var(--line); background: var(--surface); }
+}
