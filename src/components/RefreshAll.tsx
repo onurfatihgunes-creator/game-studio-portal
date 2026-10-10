@@ -2,9 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { refreshGameAction } from "@/app/(portal)/games/actions";
 
-/** Refreshes games a few at a time from the browser so no single request exceeds serverless time limits. */
+/**
+ * Refreshes games 4 at a time from the browser so no single request exceeds serverless time limits.
+ * Uses a route handler (not a Server Action): Next dispatches Server Actions one at a time per client.
+ */
 export function RefreshAll({ gameIds }: { gameIds: string[] }) {
   const router = useRouter();
   const [progress, setProgress] = useState<{ done: number; failed: number } | null>(null);
@@ -18,7 +20,13 @@ export function RefreshAll({ gameIds }: { gameIds: string[] }) {
     let failed = 0;
     const worker = async () => {
       for (let id = queue.shift(); id; id = queue.shift()) {
-        const r = await refreshGameAction(id).catch(() => ({ ok: false as const }));
+        const r = await fetch("/api/games/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id }),
+        })
+          .then((res) => res.json() as Promise<{ ok: boolean }>)
+          .catch(() => ({ ok: false }));
         done++;
         if (!r.ok) failed++;
         setProgress({ done, failed });

@@ -4,23 +4,14 @@ import { revalidatePath } from "next/cache";
 import { requireGitHubConfig } from "@/lib/github/config";
 import { scanRepository } from "@/lib/github/scan";
 import type { ScanResult } from "@/lib/github/types";
-import { applyScan, getGame, insertGame, recordSyncError } from "@/lib/games";
+import { addGame, parseRepoRef, refreshGame } from "@/lib/game-sync";
+import { getGame } from "@/lib/games";
 import { requireUser } from "@/lib/supabase/server";
 import { DEV_STATUSES, type DevStatus, type GameType } from "@/lib/types";
 
 export type ActionResult<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
-const NAME_RE = /^[A-Za-z0-9_.-]{1,100}$/;
 const msg = (e: unknown) => (e instanceof Error ? e.message : "Unexpected error");
-
-function parseRepoRef(installationId: unknown, owner: unknown, repo: unknown) {
-  const id = Number(installationId);
-  if (!Number.isInteger(id) || id <= 0) throw new Error("Invalid installation");
-  if (typeof owner !== "string" || typeof repo !== "string" || !NAME_RE.test(owner) || !NAME_RE.test(repo)) {
-    throw new Error("Invalid repository");
-  }
-  return { id, owner, repo };
-}
 
 /** Step 2 — Scan project. Read-only against GitHub, writes nothing. */
 export async function scanRepoAction(installationId: number, owner: string, repo: string): Promise<ActionResult<{ scan: ScanResult; alreadyConnectedId: string | null }>> {
@@ -49,14 +40,7 @@ export async function addGameAction(input: {
 }): Promise<ActionResult<{ id: string }>> {
   try {
     const { supabase } = await requireUser();
-    const ref = parseRepoRef(input.installationId, input.owner, input.repo);
-    const name = input.name.trim();
-    if (!name || name.length > 120) throw new Error("Enter a game name (max 120 characters).");
-    if (input.type !== "mini" && input.type !== "premium") throw new Error("Choose Mini or Premium.");
-    if (!DEV_STATUSES.includes(input.devStatus)) throw new Error("Choose a development status.");
-
-    const scan = await scanRepository(requireGitHubConfig(), ref.id, ref.owner, ref.repo);
-    const id = await insertGame(supabase, scan, { name, type: input.type, devStatus: input.devStatus });
+    const id = await addGame(supabase, input);
     revalidatePath("/", "layout");
     return { ok: true, id };
   } catch (e) {
@@ -68,15 +52,7 @@ export async function addGameAction(input: {
 export async function refreshGameAction(gameId: string): Promise<ActionResult> {
   try {
     const { supabase } = await requireUser();
-    const game = await getGame(supabase, gameId);
-    if (!game) throw new Error("Game not found");
-    try {
-      const scan = await scanRepository(requireGitHubConfig(), game.github_installation_id, game.owner, game.repo);
-      await applyScan(supabase, game.id, scan);
-    } catch (e) {
-      await recordSyncError(supabase, game.id, msg(e));
-      throw e;
-    }
+    await refreshGame(supabase, gameId);
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (e) {

@@ -5,6 +5,13 @@ import type { DevStatus, GameRow, GameType, WorkflowRow } from "./types";
 
 type Db = SupabaseClient;
 
+export class DuplicateGameError extends Error {
+  constructor(fullName: string) {
+    super(`${fullName} is already connected.`);
+    this.name = "DuplicateGameError";
+  }
+}
+
 function gameFields(scan: ScanResult) {
   const c = scan.latestCommit;
   return {
@@ -92,7 +99,7 @@ export async function insertGame(
     .select("id")
     .single();
   if (error) {
-    if (error.code === "23505") throw new Error(`${scan.repo.fullName} is already connected.`);
+    if (error.code === "23505") throw new DuplicateGameError(scan.repo.fullName);
     throw new Error(`Saving game failed: ${error.message}`);
   }
   await replaceWorkflows(db, data.id, scan);

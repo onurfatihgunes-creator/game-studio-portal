@@ -38,7 +38,7 @@ export default async function NewGamePage() {
 
   return (
     <>
-      <PageHeader title="Connect a game" subtitle="Select a repository, scan it, then add it. Nothing is saved until GitHub has answered." />
+      <PageHeader title="Connect a game" subtitle="Select a repository, scan it, then add it. Nothing is saved until GitHub has answered." actions={<Link href="/games/import" className="btn">Import many</Link>} />
       {error ? (
         <EmptyState title="Could not reach GitHub">
           <p className="text-[var(--bad-fg)]">{error}</p>

@@ -231,3 +231,21 @@ async function detectDocs(token: string, base: string, root: DirEntry[]): Promis
   }
   return docs;
 }
+
+/**
+ * Cheap discovery probe for bulk import: one API call, no writes.
+ * True when the repo root has a ProjectSettings directory (same rule the full scan uses first).
+ * Nested Unity projects are not found here; the full scan at import time still handles them.
+ */
+export async function quickUnityCheck(config: GitHubConfig, installationId: number, owner: string, name: string): Promise<boolean> {
+  const token = await getInstallationToken(config, installationId);
+  const root = await ghJson<DirEntry[]>(
+    token,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/contents/`,
+    { allowNotFound: true },
+  ).catch((e) => {
+    if ((e as { status?: number }).status === 404) return null;
+    throw e;
+  });
+  return Array.isArray(root) && root.some((e) => e.name === "ProjectSettings" && e.type === "dir");
+}

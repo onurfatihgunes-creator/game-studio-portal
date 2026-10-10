@@ -6,6 +6,8 @@ A small web portal for tracking a portfolio of Unity mobile games. Connect a gam
 2. **Scan project** — the server reads the repo through the GitHub API (read-only).
 3. **Add game** — only now is a record saved, from a fresh server-side scan.
 
+Connecting many games: **Games → Import many** finds Unity repositories automatically, hides the ones already connected, and imports your selection with progress, per-row errors and retry (see [Bulk import](#bulk-import)).
+
 Pages: **Overview · Games · Releases · Revenue**. Next.js 16 (App Router) · TypeScript · Tailwind 4 · Supabase (Postgres + Auth) · GitHub App · Vercel-compatible. No queues, workers, or extra services.
 
 ## What is real, and what is "Not configured"
@@ -76,7 +78,7 @@ npm run test:connection -- your-org/your-game # also runs the full scan on one r
 
 Optionally set `PORTAL_TEST_EMAIL` / `PORTAL_TEST_PASSWORD` (a Supabase user) in `.env.local` to also verify signed-in reads. Exit code is non-zero on any failed check. When signed in, `GET /api/health` runs the same credential checks.
 
-Unit/integration tests (no network): `npm test` — classifier, status derivation, App-JWT signing, and the full scan pipeline against an in-memory GitHub fake. `npm run typecheck` for types.
+Unit/integration tests (no network): `npm test` — classifier, status derivation, App-JWT signing, the full scan pipeline against an in-memory GitHub fake, bulk-import discovery, duplicate handling and API route protection. `npm run typecheck` for types.
 
 ### 5. Deploy to Vercel
 
@@ -85,6 +87,14 @@ Unit/integration tests (no network): `npm test` — classifier, status derivatio
 3. Deploy, sign in, and run the connection test locally against the same credentials (or open `/api/health` while signed in).
 
 No GitHub webhook or callback URL is needed, so there's nothing to update after the first deploy.
+
+## Bulk import
+
+`/games/import` lists every repository the GitHub App can see, minus those already connected, and checks each (read-only, one API call per repo) for a `ProjectSettings` folder at the repository root. Unity repos are preselected (archived ones are not). You can edit each game's name, type and status, or set type/status for all selected rows at once, then **Import**. Imports run 4 at a time; each row ends as *Added*, *Already connected* or *Failed* (with GitHub's/Supabase's message) and failed rows can be retried. Each import does the same fresh server-side scan as the single-game wizard, and duplicates are impossible: `games.github_repo_id` is unique.
+
+Unity projects inside subfolders aren't found by the quick check; tick **Show all repositories**, select them manually, and the import scan will locate the nested project.
+
+The browser calls small route handlers (`/api/games/discover|import|refresh`) rather than Server Actions because Next dispatches Server Actions one at a time per client. The handlers require a same-origin JSON request and a valid Supabase session.
 
 ## Master Game PM boundary
 
@@ -113,7 +123,7 @@ tests/
 - **"Ready" means evidence, not guarantees.** Android/iOS readiness only reflects a build workflow that names the platform and its latest result. Signing keys, store listings, and bundle settings aren't checked.
 - **Monetization is SDK presence** in the manifest (and only for the first Unity project found); it doesn't prove ads are live. **Publishing status** doesn't read store state.
 - **Type and development status are manual.**
-- **Snapshots, no webhooks.** Data is as fresh as the last Refresh (per game, or "Refresh all", which runs 4 games at a time from the browser to stay inside serverless time limits; ~8 GitHub calls per game). Status after a manual run is a best-effort refresh 2.5 s later.
+- **Snapshots, no webhooks.** Data is as fresh as the last Refresh (per game, or "Refresh all", which runs 4 games at a time from the browser via `/api/games/refresh` to stay inside serverless time limits; ~8 GitHub calls per game). Status after a manual run is a best-effort refresh 2.5 s later.
 - **Runs shown are for the default branch only.** Runs on feature branches are ignored.
 - **Manual triggers:** default branch only, no workflow inputs (workflows with required inputs are blocked), no cancel/re-run.
 - **Nested Unity projects:** the shallowest `ProjectSettings` is used; in huge monorepos the recursive tree may be truncated and only the repo root is checked (noted on the game).

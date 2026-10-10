@@ -29,6 +29,7 @@ export default async function GamesPage({ searchParams }: { searchParams: Promis
         actions={
           <>
             <RefreshAll gameIds={allGames.map((g) => g.id)} />
+            <Link href="/games/import" className="btn">Import many</Link>
             <Link href="/games/new" className="btn btn-primary">Connect game</Link>
           </>
         }
