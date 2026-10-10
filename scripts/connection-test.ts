@@ -17,6 +17,96 @@ const ok = (m: string) => console.log(`  ✔ ${m}`);
 const bad = (m: string) => { failed = true; console.log(`  ✘ ${m}`); };
 const step = (m: string) => console.log(`\n${m}`);
 
+const TABLES = ["games", "game_workflows", "workflow_dispatches"] as const;
+const RLS_DENIED = "42501";
+
+async function supabaseChecks(url: string, key: string) {
+  const anon = createClient(url, key, { auth: { persistSession: false } });
+
+  // Auth server reachable + public sign-ups disabled (RLS grants every signed-in user access).
+  const settings = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: key } });
+  if (!settings.ok) bad(`auth server not reachable (${settings.status})`);
+  else {
+    ok("auth server reachable");
+    const { disable_signup } = (await settings.json()) as { disable_signup?: boolean };
+    if (disable_signup) ok("public sign-ups are disabled");
+    else bad("SECURITY: public sign-ups are ENABLED — anyone could register and read all data");
+  }
+
+  // Anonymous: every table must refuse reads and writes.
+  for (const t of TABLES) {
+    const read = await anon.from(t).select("*").limit(1);
+    if (read.error?.code === RLS_DENIED) ok(`anon read denied on ${t}`);
+    else if (read.error?.code === "42P01" || read.error?.code === "PGRST205") bad(`table ${t} missing — run the migration`);
+    else if (read.error) bad(`anon read on ${t}: unexpected error ${read.error.code} ${read.error.message}`);
+    else bad(`SECURITY: anonymous read on ${t} succeeded (${read.data.length} rows visible)`);
+
+    // An empty insert can never succeed (NOT NULL columns), so this probe is harmless either way.
+    const write = await anon.from(t).insert({});
+    if (write.error?.code === RLS_DENIED) ok(`anon write denied on ${t}`);
+    else bad(`anon write on ${t}: expected permission denied, got ${write.error ? write.error.code + " " + write.error.message : "success"}`);
+  }
+
+  // Authenticated.
+  const email = process.env.PORTAL_TEST_EMAIL;
+  const password = process.env.PORTAL_TEST_PASSWORD;
+  if (!email || !password) {
+    console.log("  · set PORTAL_TEST_EMAIL / PORTAL_TEST_PASSWORD in .env.local to test signed-in access");
+    return;
+  }
+  const wrong = await createClient(url, key, { auth: { persistSession: false } }).auth.signInWithPassword({ email, password: password + "x" });
+  if (wrong.error) ok("wrong password is rejected");
+  else bad("SECURITY: sign-in succeeded with a wrong password");
+
+  const db = createClient(url, key, { auth: { persistSession: false } });
+  const { data: session, error: signErr } = await db.auth.signInWithPassword({ email, password });
+  if (signErr || !session.user) return bad(`sign-in failed: ${signErr?.message}`);
+  ok("sign-in works (user id " + session.user.id.slice(0, 8) + "…)");
+  const { data: who } = await db.auth.getUser();
+  if (who.user?.email === email) ok("session validates server-side (auth.getUser)");
+  else bad("session did not validate");
+
+  for (const t of TABLES) {
+    const { count, error } = await db.from(t).select("*", { count: "exact", head: true });
+    if (error) bad(`signed-in read on ${t} failed: ${error.message}`);
+    else ok(`signed-in read on ${t}: ${count} rows`);
+  }
+
+  // Full CRUD cycle on a clearly-marked temporary row; always cleaned up.
+  const marker = "__rls_test__";
+  const row = {
+    name: marker, game_type: "mini", github_installation_id: 0, github_repo_id: -Math.floor(Math.random() * 1e9) - 1,
+    owner: marker, repo: marker, full_name: `${marker}/${marker}`, html_url: "https://example.invalid", default_branch: "main",
+    is_private: true, connected_at: new Date().toISOString(), last_synced_at: new Date().toISOString(),
+  };
+  const ins = await db.from("games").insert(row).select("id").single();
+  if (ins.error) return bad(`signed-in insert on games failed: ${ins.error.message}`);
+  ok("signed-in insert on games");
+  const id = ins.data.id as string;
+  try {
+    const upd = await db.from("games").update({ dev_status: "paused" }).eq("id", id).select("dev_status").single();
+    if (upd.data?.dev_status === "paused") ok("signed-in update on games"); else bad(`signed-in update failed: ${upd.error?.message}`);
+
+    const wf = await db.from("game_workflows").insert({ game_id: id, name: marker, path: marker }).select("id").single();
+    if (wf.error) bad(`signed-in insert on game_workflows failed: ${wf.error.message}`); else ok("signed-in insert on game_workflows");
+
+    const anonSees = await anon.from("games").select("id").eq("id", id);
+    if (anonSees.error?.code === RLS_DENIED || (anonSees.data ?? []).length === 0) ok("anon cannot see the new row");
+    else bad("SECURITY: anon can see authenticated data");
+
+    // Audit log: members may only write entries as themselves.
+    const spoof = await db.from("workflow_dispatches").insert({
+      game_name: marker, workflow_path: marker, ref: "main", outcome: "rejected", user_id: "00000000-0000-4000-8000-000000000000",
+    });
+    if (spoof.error) ok("audit log rejects entries attributed to another user"); else bad("SECURITY: audit entry with a spoofed user_id was accepted");
+  } finally {
+    const del = await db.from("games").delete().eq("id", id).select("id");
+    if (del.error || (del.data ?? []).length !== 1) bad(`CLEANUP FAILED — delete the row named ${marker} in the games table manually`);
+    else ok("signed-in delete on games (cascade removed the test workflow); test data cleaned up");
+  }
+  await db.auth.signOut();
+}
+
 async function main() {
   const target = process.argv[2];
 
@@ -57,25 +147,7 @@ async function main() {
   if (!url || !key) {
     bad("missing NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY");
   } else {
-    const anon = createClient(url, key, { auth: { persistSession: false } });
-    const { data, error } = await anon.from("games").select("id").limit(1);
-    if (error) bad(`games table not reachable (did you run the migration?): ${error.message}`);
-    else if ((data ?? []).length > 0) bad("SECURITY: anonymous clients can read games — RLS is not enforced");
-    else ok("migration applied; anonymous access returns no rows (RLS enforced)");
-
-    const email = process.env.PORTAL_TEST_EMAIL;
-    const password = process.env.PORTAL_TEST_PASSWORD;
-    if (email && password) {
-      const { error: signErr } = await anon.auth.signInWithPassword({ email, password });
-      if (signErr) bad(`sign-in failed: ${signErr.message}`);
-      else {
-        const { count, error: readErr } = await anon.from("games").select("id", { count: "exact", head: true });
-        if (readErr) bad(`signed-in read failed: ${readErr.message}`);
-        else ok(`signed in as ${email}; ${count} games visible`);
-      }
-    } else {
-      console.log("  · set PORTAL_TEST_EMAIL / PORTAL_TEST_PASSWORD to also test signed-in access");
-    }
+    await supabaseChecks(url, key);
   }
 
   console.log(failed ? "\nFAILED" : "\nAll checks passed");
