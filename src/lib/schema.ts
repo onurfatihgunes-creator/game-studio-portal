@@ -9,8 +9,12 @@ export function isMissingSchemaError(e: { code?: string; message?: string } | nu
   return !!e && (e.code === "42P01" || e.code === "42703" || e.code === "PGRST205" || e.code === "PGRST204" || /schema cache/i.test(e.message ?? ""));
 }
 
-async function tableExists(db: SupabaseClient, table: string): Promise<boolean> {
-  const { error } = await db.from(table).select("*", { head: true, count: "exact" }).limit(1);
+/**
+ * A plain GET, not a HEAD request: for a missing table supabase-js reports a HEAD as success (HTTP 204, no error),
+ * which made the page believe the migration had been applied and crash instead of showing the notice.
+ */
+export async function tableExists(db: SupabaseClient, table: string): Promise<boolean> {
+  const { error } = await db.from(table).select("*").limit(1);
   return !isMissingSchemaError(error);
 }
 
