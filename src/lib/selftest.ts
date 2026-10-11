@@ -47,7 +47,8 @@ export async function deepChecks(db: SupabaseClient, origin: string, cookie: str
   for (const p of pages) {
     try {
       const res = await fetch(new URL(p.path, origin), { headers: { cookie }, cache: "no-store", redirect: "manual" });
-      const html = res.status === 200 ? await res.text() : "";
+      // React escapes "&" as "&amp;" in HTML, so compare against the decoded text.
+      const html = res.status === 200 ? (await res.text()).replace(/&amp;/g, "&") : "";
       const bad = /Application error|Internal Server Error|Unhandled Runtime Error/i.test(html);
       add(`page ${p.path}`, res.status === 200 && html.includes(p.expect) && !bad, `HTTP ${res.status}${res.status === 200 ? (html.includes(p.expect) ? `, shows “${p.expect}”` : `, MISSING “${p.expect}”`) : ""}${bad ? ", error marker found" : ""}`);
     } catch (e) {

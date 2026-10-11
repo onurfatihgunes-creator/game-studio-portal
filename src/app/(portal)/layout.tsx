@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { NavLinks } from "@/components/NavLinks";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { requireUser } from "@/lib/supabase/server";
@@ -17,6 +18,7 @@ export default async function PortalLayout({ children }: { children: React.React
         <div className="mb-6 px-2 text-sm font-semibold tracking-tight">Game Studio Portal</div>
         <nav className="flex flex-col gap-1"><NavLinks variant="side" /></nav>
         <div className="mt-auto flex flex-col gap-2">
+          <Link href="/system" className="px-1 text-xs text-muted hover:underline">System check</Link>
           <p className="truncate px-1 text-xs text-muted" title={user.email ?? ""}>{user.email}</p>
           <div className="flex gap-2"><ThemeToggle />{signOut}</div>
         </div>

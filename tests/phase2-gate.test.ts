@@ -20,3 +20,10 @@ describe("graceful handling of an un-applied migration", () => {
     expect(schemaHint("duplicate key value")).toBe("duplicate key value");
   });
 });
+
+describe("page smoke check text matching", () => {
+  it("matches headings containing ampersands after HTML decoding", () => {
+    const html = "<h2>Builds &amp; tests</h2>".replace(/&amp;/g, "&");
+    expect(html.includes("Builds & tests")).toBe(true);
+  });
+});
