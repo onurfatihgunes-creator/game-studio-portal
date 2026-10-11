@@ -204,7 +204,7 @@ describe("OAuth callback reports the REAL failing stage (and never logs secrets)
     expect(r.code).toBe("scope"); expect(r.logs).toMatch(/missing admob\.report/);
   });
   it("AdMob API not enabled in the Cloud project → api_disabled", async () => {
-    const body = { error: { code: 403, message: "AdMob API has not been used in project 212433233685 before or it is disabled.", details: [{ reason: "SERVICE_DISABLED" }] } };
+    const body = { error: { code: 403, message: "AdMob API has not been used in project 123456789012 before or it is disabled.", details: [{ reason: "SERVICE_DISABLED" }] } };
     const r = await run({ accounts: { status: 403, body } });
     expect(r.code).toBe("api_disabled"); expect(r.logs).toMatch(/AdMob accounts\.list.*has not been used/);
   });
