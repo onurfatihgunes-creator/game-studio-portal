@@ -186,6 +186,15 @@ describe("Apply to one game", () => {
     expect(writes(repo)).toBe(0);
   });
 
+  it("a GitHub App without the Pull requests permission gets a clear message, not a raw 403", async () => {
+    const repo = new FakeRepo("o/one", unityFiles());
+    repo.openPullRequests = async () => { throw Object.assign(new Error("GitHub 403 on /pulls"), { status: 403 }); };
+    const r = await applyToGame(deps(repo, { canWrite: false }), game(), cfgOf(A));
+    expect(r).toMatchObject({ status: "failed", action: "blocked" });
+    expect(r.detail).toMatch(/no Pull requests permission/);
+    expect(writes(repo)).toBe(0);
+  });
+
   it("does not recreate a closed integration PR, and skips archived / non-Unity repositories", async () => {
     const repo = new FakeRepo("o/one", unityFiles());
     repo.branches.set(INTEGRATION_BRANCH, new Map());

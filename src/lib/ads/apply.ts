@@ -206,8 +206,14 @@ export async function applyToGame(deps: ApplyDeps, game: ApplyGame, own: AdsConf
         : result(game, { ...base, status: "needs_integration", detail: `Module ${def.version} is in ${git.defaultBranch}, but no verified placement hooks were found (Assets/StudioAds/StudioAdsPlacements.json must name the game's hook file).` });
     }
 
-    const mine = (await git.openPullRequests()).filter(isOurs).sort((a, b) => a.number - b.number);
-    const pr = mine[0];
+    let open: PullRequest[];
+    try { open = await git.openPullRequests(); }
+    catch (e) {
+      // pull requests are not even readable without the "Pull requests" permission
+      if ((e as { status?: number }).status === 403) return result(game, { ...base, status: "failed", action: "blocked", detail: "The GitHub App has no Pull requests permission, so it cannot look for or create pull requests. Grant Contents and Pull requests: Read & write, then apply again." });
+      throw e;
+    }
+    const pr = open.filter(isOurs).sort((a, b) => a.number - b.number)[0];
 
     if (pr) {
       const st = await inspectRef(git, pr.head, root);
