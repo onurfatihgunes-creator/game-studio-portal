@@ -45,6 +45,26 @@ describe("OAuth helpers", () => {
   });
 });
 
+describe("accounts.list request matches Google's official client library", () => {
+  it("is GET /v1/accounts with only Authorization: Bearer (no Content-Type, no body), per the API reference", async () => {
+    const { listPublisherIds } = await import("@/lib/revenue/admob");
+    let seen: { url: string; method?: string; headers: Record<string, string>; body?: unknown } | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      seen = { url: String(input), method: init?.method, headers: init?.headers as Record<string, string>, body: init?.body }; return json({ account: [{ publisherId: "pub-1" }] });
+    }));
+    expect(await listPublisherIds("ya29.x")).toEqual(["pub-1"]);
+    expect(seen!.url).toBe("https://admob.googleapis.com/v1/accounts");
+    expect(seen!.method ?? "GET").toBe("GET");
+    expect(seen!.headers).toEqual({ Authorization: "Bearer ya29.x" }); // exactly what @googleapis/admob 11.0.1 sends (verified against a capture server)
+    expect(seen!.body).toBeUndefined();
+  });
+  it("records Google's full error body when there is no machine-readable reason", async () => {
+    const { listPublisherIds } = await import("@/lib/revenue/admob");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: { code: 401, message: "Request is missing required authentication credential.", status: "UNAUTHENTICATED" } }), { status: 401 })));
+    await expect(listPublisherIds("ya29.x")).rejects.toThrow(/\[no www-authenticate header\].*\[response-body=.*UNAUTHENTICATED/);
+  });
+});
+
 describe("report handling", () => {
   const stream = [
     { header: { dateRange: {}, localizationSettings: { currencyCode: "EUR" } } },

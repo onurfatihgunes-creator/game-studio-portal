@@ -62,17 +62,19 @@ export async function revokeToken(token: string): Promise<void> {
 
 // ── API calls ────────────────────────────────────────────────────────────────
 async function api<T>(accessToken: string, path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, { ...init, cache: "no-store", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json", ...(init?.headers ?? {}) } });
+  // Identical to what Google's official client library sends for a GET: only Authorization (Content-Type only when there is a body).
+  const res = await fetch(`${API}${path}`, { ...init, headers: { Authorization: `Bearer ${accessToken}`, ...(init?.body ? { "Content-Type": "application/json" } : {}), ...(init?.headers ?? {}) } });
   if (!res.ok) {
-    let detail = ""; let reason = "";
+    let detail = ""; let reason = ""; let rawBody = "";
     try {
-      const j = (await res.json()) as { error?: { message?: string; details?: { reason?: string }[] } };
+      rawBody = (await res.text()).slice(0, 700); // Google's error bodies carry no credentials; kept for diagnosis
+      const j = JSON.parse(rawBody) as { error?: { message?: string; details?: { reason?: string }[] } };
       detail = j.error?.message ?? ""; reason = j.error?.details?.find((d) => d.reason)?.reason ?? "";
     } catch { /* not JSON */ }
     // Google reports "API not enabled in the Cloud project" as 403 SERVICE_DISABLED / accessNotConfigured.
     const disabled = reason === "SERVICE_DISABLED" || reason === "ACCESS_NOT_CONFIGURED" || /has not been used in project|is disabled|accessNotConfigured/i.test(detail);
     const wa = res.headers.get("www-authenticate");
-    throw new AdMobError(`AdMob API ${res.status}: ${detail || res.statusText}${reason ? ` [reason=${reason}]` : ""}${wa ? ` [www-authenticate=${wa.slice(0, 160)}]` : ""}`, res.status === 401 ? "reauthorize" : disabled ? "api_disabled" : res.status === 403 ? "forbidden" : "failed");
+    throw new AdMobError(`AdMob API ${res.status}: ${detail || res.statusText}${reason ? ` [reason=${reason}]` : ""}${wa ? ` [www-authenticate=${wa.slice(0, 160)}]` : " [no www-authenticate header]"}${reason ? "" : ` [response-body=${rawBody.replace(/\s+/g, " ")}]`}`, res.status === 401 ? "reauthorize" : disabled ? "api_disabled" : res.status === 403 ? "forbidden" : "failed");
   }
   return (await res.json()) as T;
 }
