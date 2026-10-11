@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 
 /** Failure stage → short code shown on the Revenue page. The log line carries Google's own (secret-free) message. */
 const fail = (req: NextRequest, code: string, stage: string, detail?: string) => {
-  console.warn(`[admob] connect failed at "${stage}"${detail ? `: ${detail.slice(0, 300)}` : ""}`);
+  console.warn(`[admob] connect failed at "${stage}"${detail ? `: ${detail.slice(0, 1500)}` : ""}`);
   return back(req, code);
 };
 

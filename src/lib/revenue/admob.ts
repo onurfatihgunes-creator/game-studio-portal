@@ -32,7 +32,7 @@ export function buildAuthUrl(p: { clientId: string; redirectUri: string; state: 
   const u = new URL(AUTH_URL);
   u.search = new URLSearchParams({
     client_id: p.clientId, redirect_uri: p.redirectUri, response_type: "code", scope: ADMOB_SCOPES.join(" "),
-    access_type: "offline", prompt: "consent", include_granted_scopes: "false", state: p.state,
+    access_type: "offline", prompt: "select_account consent", include_granted_scopes: "false", state: p.state,
     code_challenge: p.challenge, code_challenge_method: "S256",
   }).toString();
   return u.toString();

@@ -24,7 +24,7 @@ const ERRORS: Record<string, string> = {
   no_refresh: "Google did not issue a long-lived authorization. Remove this app at myaccount.google.com/permissions, then connect again.",
   api_disabled: "The AdMob API is not enabled in your Google Cloud project. Enable it (APIs & Services ▸ Library ▸ AdMob API), wait a minute, then connect again.",
   forbidden: "Google refused AdMob access for this account (HTTP 403). Use the Google account that owns the AdMob account and accept both permissions.",
-  api_unauthorized: "Google rejected the access token for the AdMob API (HTTP 401). The exact reason is in the server log ([admob] line).",
+  api_unauthorized: "Google accepted the sign-in, but the AdMob API says this Google account is not authorized for an AdMob account (HTTP 401). Connect again and, in Google's account chooser, pick the account that owns or has a role in your AdMob account (the one you use at apps.admob.com).",
   api_failed: "The AdMob API request failed. Try again in a moment; details are in the server log ([admob] lines).",
   storage: "The authorization worked but could not be saved. Details are in the server log ([admob] lines).", scope: "Both read-only AdMob permissions are required. Try again and leave them ticked.",
   account: "No AdMob account was found for that Google user.",

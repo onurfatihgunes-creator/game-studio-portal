@@ -37,7 +37,7 @@ describe("OAuth helpers", () => {
     const u = new URL(buildAuthUrl({ clientId: "cid", redirectUri: "http://localhost:3000/cb", state: "st", challenge: "ch" }));
     expect(u.host).toBe("accounts.google.com");
     expect(u.searchParams.get("access_type")).toBe("offline");
-    expect(u.searchParams.get("prompt")).toBe("consent");
+    expect(u.searchParams.get("prompt")).toBe("select_account consent"); // always show the account chooser; the AdMob owner may not be the browser's default account
     expect(u.searchParams.get("code_challenge_method")).toBe("S256");
     expect(u.searchParams.get("state")).toBe("st");
     expect(u.searchParams.get("scope")!.split(" ")).toEqual(ADMOB_SCOPES);
