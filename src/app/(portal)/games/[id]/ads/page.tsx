@@ -7,7 +7,7 @@ import { getAdsConfig } from "@/lib/ads/store";
 import { integrationChecklist, onboardCommand } from "@/lib/ads/integration";
 import { getGame } from "@/lib/games";
 import { MigrationNotice } from "@/components/MigrationNotice";
-import { phase2Ready } from "@/lib/phase2";
+import { MIGRATION_ADS, schemaState } from "@/lib/schema";
 import { requireUser } from "@/lib/supabase/server";
 import { AdsForm } from "./AdsForm";
 
@@ -19,7 +19,7 @@ export default async function AdsPage({ params }: { params: Promise<{ id: string
   const { supabase } = await requireUser();
   const game = await getGame(supabase, id);
   if (!game) notFound();
-  if (!(await phase2Ready(supabase))) return <><PageHeader title={`${game.name} · Advertising`} /><MigrationNotice what="Advertising configuration" /></>;
+  if (!(await schemaState(supabase)).ads) return <><PageHeader title={`${game.name} · Advertising`} /><MigrationNotice what="Advertising configuration" file={MIGRATION_ADS} /></>;
   const row = await getAdsConfig(supabase, id);
   const cfg = normalizeConfig(row ?? emptyConfig());
   const m = game.monetization;

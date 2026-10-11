@@ -1,8 +1,8 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ScanResult } from "./github/types";
-import { schemaHint } from "./phase2";
-import type { BuildRunRow, DevStatus, GameRow, GameType, WorkflowRow } from "./types";
+import { schemaHint } from "./schema";
+import type { DevStatus, GameRow, GameType } from "./types";
 
 type Db = SupabaseClient;
 
@@ -44,47 +44,6 @@ function gameFields(scan: ScanResult) {
   };
 }
 
-function workflowRows(gameId: string, scan: ScanResult) {
-  return scan.workflows.map((w) => ({
-    game_id: gameId,
-    github_workflow_id: w.githubWorkflowId,
-    name: w.name,
-    path: w.path,
-    state: w.state,
-    kinds: w.kinds,
-    platforms: w.platforms,
-    signals: w.signals,
-    triggers: w.triggers,
-    ci_ref: w.ciRef,
-    ci_actions: w.ciActions,
-    dispatchable: w.dispatchable,
-    has_required_inputs: w.hasRequiredInputs,
-    run_id: w.latestRun?.id ?? null,
-    run_number: w.latestRun?.number ?? null,
-    run_status: w.latestRun?.status ?? null,
-    run_conclusion: w.latestRun?.conclusion ?? null,
-    run_event: w.latestRun?.event ?? null,
-    run_branch: w.latestRun?.branch ?? null,
-    run_url: w.latestRun?.url ?? null,
-    run_started_at: w.latestRun?.startedAt ?? null,
-    run_updated_at: w.latestRun?.updatedAt ?? null,
-  }));
-}
-
-async function replaceWorkflows(db: Db, gameId: string, scan: ScanResult) {
-  const rows = workflowRows(gameId, scan);
-  if (rows.length) {
-    const { error } = await db.from("game_workflows").upsert(rows, { onConflict: "game_id,path" });
-    if (error) throw new Error(schemaHint(`Saving workflows failed: ${error.message}`));
-  }
-  // Remove workflows that no longer exist in the repo.
-  const keep = rows.map((r) => r.path);
-  let del = db.from("game_workflows").delete().eq("game_id", gameId);
-  if (keep.length) del = del.not("path", "in", `(${keep.map((p) => `"${p}"`).join(",")})`);
-  const { error } = await del;
-  if (error) throw new Error(`Cleaning workflows failed: ${error.message}`);
-}
-
 /** Create a game from a scan that the GitHub API has already answered successfully. */
 export async function insertGame(
   db: Db,
@@ -106,14 +65,12 @@ export async function insertGame(
     if (error.code === "23505") throw new DuplicateGameError(scan.repo.fullName);
     throw new Error(schemaHint(`Saving game failed: ${error.message}`));
   }
-  await replaceWorkflows(db, data.id, scan);
   return data.id;
 }
 
 export async function applyScan(db: Db, gameId: string, scan: ScanResult) {
   const { error } = await db.from("games").update(gameFields(scan)).eq("id", gameId);
   if (error) throw new Error(schemaHint(`Saving game failed: ${error.message}`));
-  await replaceWorkflows(db, gameId, scan);
 }
 
 export async function recordSyncError(db: Db, gameId: string, message: string) {
@@ -126,30 +83,8 @@ export async function listGames(db: Db): Promise<GameRow[]> {
   return (data ?? []) as GameRow[];
 }
 
-export async function listWorkflows(db: Db, gameId?: string): Promise<WorkflowRow[]> {
-  let q = db.from("game_workflows").select("*").order("name");
-  if (gameId) q = q.eq("game_id", gameId);
-  const { data, error } = await q;
-  if (error) throw new Error(error.message);
-  return (data ?? []) as WorkflowRow[];
-}
-
 export async function getGame(db: Db, id: string): Promise<GameRow | null> {
   const { data, error } = await db.from("games").select("*").eq("id", id).maybeSingle();
   if (error) throw new Error(error.message);
   return (data as GameRow | null) ?? null;
-}
-
-export function groupWorkflows(ws: WorkflowRow[]): Map<string, WorkflowRow[]> {
-  const m = new Map<string, WorkflowRow[]>();
-  for (const w of ws) m.set(w.game_id, [...(m.get(w.game_id) ?? []), w]);
-  return m;
-}
-
-export async function listBuildRuns(db: Db, opts: { gameId?: string; limit?: number } = {}): Promise<BuildRunRow[]> {
-  let q = db.from("build_runs").select("*").order("started_at", { ascending: false, nullsFirst: false }).limit(opts.limit ?? 200);
-  if (opts.gameId) q = q.eq("game_id", opts.gameId);
-  const { data, error } = await q;
-  if (error) throw new Error(error.message);
-  return (data ?? []) as BuildRunRow[];
 }

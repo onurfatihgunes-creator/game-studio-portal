@@ -1,13 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProviderConnection, RevenuePoint, RevenueProvider } from "./types";
 
-/** In-app purchase reporting is not built yet: it honestly reports `not_connected` and never returns data. */
-class NotConnectedProvider implements RevenueProvider {
-  constructor(readonly id: RevenueProvider["id"], readonly label: string, private readonly reason: string) {}
-  async connection(): Promise<ProviderConnection> { return { state: "not_connected", reason: this.reason }; }
-  async fetchRevenue(): Promise<RevenuePoint[]> { throw new Error(`${this.label} is not connected`); }
-}
-
 /**
  * AdMob: connected only when an authorization is stored. `fetchRevenue` reads the portal's stored daily rows
  * (filled by syncAdMob); it never fabricates values.
@@ -32,5 +25,5 @@ export class AdMobProvider implements RevenueProvider {
 }
 
 export function revenueProviders(db: SupabaseClient, admobConfigured: boolean): RevenueProvider[] {
-  return [new AdMobProvider(db, admobConfigured), new NotConnectedProvider("iap", "In-app purchases", "No store reporting source (App Store Connect / Google Play) is configured.")];
+  return [new AdMobProvider(db, admobConfigured)];
 }

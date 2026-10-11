@@ -8,8 +8,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:connection": "tsx --conditions=react-server --env-file-if-exists=.env.local scripts/connection-test.ts",
-    "test:ci-roundtrip": "tsx --conditions=react-server --env-file-if-exists=.env.local scripts/ci-roundtrip.ts"
+    "test:connection": "tsx --conditions=react-server --env-file-if-exists=.env.local scripts/connection-test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

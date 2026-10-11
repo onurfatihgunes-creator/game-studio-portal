@@ -107,7 +107,7 @@ export function ConnectWizard({ repos, connected, installUrl }: { repos: RepoSum
           <>
             <p className="text-sm text-muted">Selected</p>
             <p className="mb-4 font-medium">{selected.fullName}</p>
-            <p className="mb-4 text-sm text-muted">The scan reads repository metadata, the latest commit, the Unity version, documentation, <code>.github/workflows</code> and their latest runs. It writes nothing.</p>
+            <p className="mb-4 text-sm text-muted">The scan reads repository metadata, the latest commit, the Unity version, documentation and the advertising SDK / module files. It writes nothing.</p>
             <div className="flex gap-2">
               <button className="btn btn-primary" onClick={runScan} disabled={scanning}>{scanning ? "Scanning…" : "Scan project"}</button>
               <button className="btn" onClick={() => setSelected(null)} disabled={scanning}>Change</button>
@@ -147,14 +147,12 @@ export function ConnectWizard({ repos, connected, installUrl }: { repos: RepoSum
 }
 
 function ScanSummary({ scan }: { scan: ScanResult }) {
-  const by = (k: "test" | "build" | "publish") => scan.workflows.filter((w) => w.kinds.includes(k)).length;
   const rows: [string, React.ReactNode][] = [
     ["Repository", <>{scan.repo.fullName} · {scan.repo.isPrivate ? "private" : "public"} · default branch <code>{scan.repo.defaultBranch}</code></>],
     ["Latest commit", scan.latestCommit ? <>{scan.latestCommit.sha.slice(0, 7)} — {scan.latestCommit.message}</> : <Badge tone="muted">Empty repository</Badge>],
     ["Unity project", scan.unity.detected ? <>Unity {scan.unity.version ?? "(version unreadable)"}{scan.unity.projectPath ? <> in <code>{scan.unity.projectPath}</code></> : null}{scan.unity.note ? <span className="text-muted"> · {scan.unity.note}</span> : null}</> : <><Badge tone="warn">Not detected</Badge>{scan.unity.note && <span className="ml-2 text-muted">{scan.unity.note}</span>}</>],
     ["Documentation", scan.docs.length ? scan.docs.slice(0, 6).map((d) => d.path).join(", ") + (scan.docs.length > 6 ? ` +${scan.docs.length - 6} more` : "") : <Badge tone="muted">Not configured</Badge>],
-    ["Workflows", scan.workflows.length ? `${scan.workflows.length} found · ${by("test")} test · ${by("build")} build · ${by("publish")} publish` : <Badge tone="muted">Not configured</Badge>],
-    ["Monetization SDKs", !scan.monetization.checked ? <Badge tone="muted">Not configured</Badge> : [scan.monetization.admob && "AdMob", scan.monetization.iap && "Unity IAP", ...(scan.monetization.other_ads ?? [])].filter(Boolean).join(", ") || <Badge tone="muted">Not configured</Badge>],
+    ["Monetization SDKs", !scan.monetization.checked ? <Badge tone="muted">Not configured</Badge> : [scan.monetization.admob && "AdMob", scan.monetization.studio_ads?.module_version && "Studio ads module", ...(scan.monetization.other_ads ?? [])].filter(Boolean).join(", ") || <Badge tone="muted">Not configured</Badge>],
   ];
   return (
     <>

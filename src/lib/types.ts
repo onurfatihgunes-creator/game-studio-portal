@@ -1,4 +1,4 @@
-import type { DocEntry, Monetization, Platform, WorkflowKind } from "./github/types";
+import type { DocEntry, Monetization } from "./github/types";
 import type { ProjectFacts } from "./github/project-facts";
 
 export type GameType = "mini" | "premium";
@@ -48,83 +48,4 @@ export type GameRow = {
   last_sync_error: string | null;
   pm_ref: string | null;
   project_facts: ProjectFacts;
-};
-
-export type WorkflowRow = {
-  id: string;
-  game_id: string;
-  github_workflow_id: number | null;
-  name: string;
-  path: string;
-  state: string | null;
-  kinds: WorkflowKind[];
-  platforms: Platform[];
-  signals: string[];
-  triggers: string[];
-  ci_ref: string | null;
-  ci_actions: string[];
-  dispatchable: boolean;
-  has_required_inputs: boolean;
-  run_id: number | null;
-  run_number: number | null;
-  run_status: string | null;
-  run_conclusion: string | null;
-  run_event: string | null;
-  run_branch: string | null;
-  run_url: string | null;
-  run_started_at: string | null;
-  run_updated_at: string | null;
-  updated_at: string;
-};
-
-export type BuildRunRow = {
-  id: string;
-  game_id: string;
-  github_run_id: number;
-  workflow_path: string;
-  action: import("./ci/actions").CiAction | null;
-  title: string | null;
-  head_sha: string | null;
-  head_branch: string | null;
-  event: string | null;
-  status: string | null;
-  conclusion: string | null;
-  run_number: number | null;
-  html_url: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  duration_s: number | null;
-  failed_job: string | null;
-  failed_step: string | null;
-  version: string | null;
-  build_number: number | null;
-  bundle_id: string | null;
-  unity_version: string | null;
-  summary: {
-    tests: { mode: string; total: number; passed: number; failed: number; skipped: number; failures: { name: string; message: string }[] } | null;
-    errorSummary: string | null;
-    artifacts: { name: string; bytes?: number; sha256?: string }[];
-    notes: string[];
-  } | null;
-  artifacts: { id: number; name: string; size_bytes: number; expired: boolean; expires_at: string | null }[];
-  synced_at: string;
-};
-
-export type ReleaseStatus = "candidate" | "approved" | "rejected" | "published_manually";
-export type ReleaseRow = {
-  id: string;
-  created_at: string;
-  game_id: string;
-  platform: "android" | "ios";
-  version: string;
-  build_number: number;
-  build_run_id: string | null;
-  artifact_id: number | null;
-  artifact_name: string | null;
-  head_sha: string | null;
-  readiness: { checks: { id: string; label: string; state: "pass" | "fail" | "warn" | "unknown"; detail: string }[]; blockers: number };
-  status: ReleaseStatus;
-  decided_by_email: string | null;
-  decided_at: string | null;
-  notes: string | null;
 };

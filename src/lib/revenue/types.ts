@@ -3,7 +3,7 @@
  * actually configured, every provider reports `not_connected` and returns no figures.
  */
 
-export type ProviderId = "admob" | "iap";
+export type ProviderId = "admob";
 
 export type ProviderConnection =
   | { state: "not_connected"; reason: string }

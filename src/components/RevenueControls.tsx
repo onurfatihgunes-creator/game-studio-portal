@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
-import { applyTestDefaultsAction } from "@/app/(portal)/games/[id]/ads/actions";
 
 async function post(url: string, body: unknown = {}) {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -41,23 +40,5 @@ export function AdMobControls({ connected }: { connected: boolean }) {
         </div>
       </dialog>
     </>
-  );
-}
-
-export function AdsDefaultsButton({ missing }: { missing: number }) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [msg, setMsg] = useState<string | null>(null);
-  if (missing === 0) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <button className="btn" disabled={pending} onClick={() => start(async () => {
-        const r = await applyTestDefaultsAction();
-        setMsg(r.ok ? `Created safe test configs for ${r.created} game(s).` : r.error);
-        router.refresh();
-      })}>{pending ? "Working…" : `Create test config for ${missing} game${missing === 1 ? "" : "s"} without one`}</button>
-      <span className="text-xs text-muted">Disabled, test mode, Google demo IDs. Never overwrites an existing config.</span>
-      {msg && <span role="status" className="text-xs text-muted">{msg}</span>}
-    </div>
   );
 }

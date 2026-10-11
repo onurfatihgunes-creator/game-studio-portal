@@ -144,7 +144,7 @@ export function adsStatus(cfg: AdsConfig | null): AdsStatus {
 }
 
 /** The JSON file the Unity module reads (Resources/StudioAdsConfig.json). Contract-tested against the C# parser. */
-export function exportForUnity(cfg: AdsConfig) {
+export function exportForUnity(cfg: AdsConfig, extra: { remotePolicyUrl?: string; rewardedAvailable?: boolean } = {}) {
   const ids = (p: PlatformIds) => ({ appId: p.app_id ?? "", rewarded: p.rewarded ?? "", interstitial: p.interstitial ?? "", banner: p.banner ?? "" });
   return {
     schema: 1,
@@ -166,5 +166,8 @@ export function exportForUnity(cfg: AdsConfig) {
       tagForUnderAgeOfConsent: cfg.consent.tag_under_age_of_consent,
       maxAdContentRating: cfg.consent.max_ad_content_rating,
     },
+    // additive keys (module >= 0.4.0); omitted unless the caller provides them, so older exports stay byte-identical
+    ...(extra.remotePolicyUrl !== undefined ? { remotePolicyUrl: extra.remotePolicyUrl } : {}),
+    ...(extra.rewardedAvailable !== undefined ? { rewardedAvailable: extra.rewardedAvailable } : {}),
   };
 }

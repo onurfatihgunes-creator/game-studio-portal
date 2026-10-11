@@ -6,9 +6,9 @@ import {
   ghText,
 } from "./app";
 import { parseProjectSettings } from "./project-facts";
-import { classifyWorkflow, detectMonetization, docKind, parseUnityVersion } from "./classify";
+import { detectMonetization, docKind, parseUnityVersion } from "./classify";
 import { CONFIG_PATH, detectStudioAds, MODULE_PACKAGE } from "@/lib/ads/integration";
-import type { DocEntry, Monetization, RunSummary, ScanResult, ScannedWorkflow } from "./types";
+import type { DocEntry, Monetization, ScanResult } from "./types";
 
 type RawRepo = {
   id: number;
@@ -23,17 +23,6 @@ type RawRepo = {
   pushed_at: string | null;
 };
 type DirEntry = { name: string; path: string; type: string };
-type RawRun = {
-  id: number;
-  run_number: number;
-  status: string | null;
-  conclusion: string | null;
-  event: string;
-  head_branch: string | null;
-  html_url: string;
-  run_started_at: string | null;
-  updated_at: string | null;
-};
 
 const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
 const DOC_DIRS = new Set(["docs", "doc", "documentation"]);
@@ -57,7 +46,7 @@ export async function scanRepository(
   if (!raw) throw new Error(`Repository ${owner}/${name} not found`);
   const branch = raw.default_branch;
 
-  const [commits, rootEntries, registered, workflowDir] = await Promise.all([
+  const [commits, rootEntries] = await Promise.all([
     ghJson<
       { sha: string; html_url: string; commit: { message: string; author: { name?: string; date?: string } | null } }[]
     >(token, `${base}/commits?per_page=1&sha=${encodeURIComponent(branch)}`, { allowNotFound: true }).catch((e) => {
@@ -69,11 +58,6 @@ export async function scanRepository(
       if ((e as { status?: number }).status === 404) return null;
       throw e;
     }),
-    ghJson<{ workflows: { id: number; name: string; path: string; state: string }[] }>(
-      token,
-      `${base}/actions/workflows?per_page=100`,
-    ),
-    ghJson<DirEntry[]>(token, `${base}/contents/.github/workflows`, { allowNotFound: true }),
   ]);
 
   const root = Array.isArray(rootEntries) ? rootEntries : [];
@@ -110,39 +94,6 @@ export async function scanRepository(
     ? parseProjectSettings(await ghText(token, `${base}/contents/${enc(`${unity.projectPath ? unity.projectPath + "/" : ""}ProjectSettings/ProjectSettings.asset`)}`))
     : parseProjectSettings(null);
 
-  // ── Workflows ─────────────────────────────────────────────────────
-  const byPath = new Map((registered?.workflows ?? []).map((w) => [w.path, w]));
-  const files = (Array.isArray(workflowDir) ? workflowDir : []).filter(
-    (f) => f.type === "file" && /\.ya?ml$/i.test(f.name),
-  );
-
-  const workflows: ScannedWorkflow[] = await Promise.all(
-    files.map(async (file): Promise<ScannedWorkflow> => {
-      const reg = byPath.get(file.path);
-      const [text, run] = await Promise.all([
-        ghText(token, `${base}/contents/${enc(file.path)}`),
-        reg ? latestRun(token, base, reg.id, branch) : Promise.resolve(null),
-      ]);
-      const c = classifyWorkflow(text ?? "");
-      return {
-        githubWorkflowId: reg?.id ?? null,
-        name: reg?.name ?? c.name ?? file.name,
-        path: file.path,
-        state: reg?.state ?? null,
-        kinds: c.kinds,
-        platforms: c.platforms,
-        signals: c.signals,
-        triggers: c.triggers,
-        ciRef: c.ciRef,
-        ciActions: c.ciActions,
-        dispatchable: c.hasWorkflowDispatch && reg?.state === "active",
-        hasRequiredInputs: c.hasRequiredInputs,
-        latestRun: run,
-      };
-    }),
-  );
-  workflows.sort((a, b) => a.name.localeCompare(b.name));
-
   return {
     scannedAt: new Date().toISOString(),
     repo: {
@@ -162,28 +113,7 @@ export async function scanRepository(
     unity,
     docs,
     monetization,
-    workflows,
     projectFacts,
-  };
-}
-
-export async function latestRun(token: string, base: string, workflowId: number, branch: string): Promise<RunSummary | null> {
-  const body = await ghJson<{ workflow_runs: RawRun[] }>(
-    token,
-    `${base}/actions/workflows/${workflowId}/runs?branch=${encodeURIComponent(branch)}&per_page=1`,
-  );
-  const r = body?.workflow_runs?.[0];
-  if (!r) return null;
-  return {
-    id: r.id,
-    number: r.run_number,
-    status: r.status,
-    conclusion: r.conclusion,
-    event: r.event,
-    branch: r.head_branch,
-    url: r.html_url,
-    startedAt: r.run_started_at,
-    updatedAt: r.updated_at,
   };
 }
 

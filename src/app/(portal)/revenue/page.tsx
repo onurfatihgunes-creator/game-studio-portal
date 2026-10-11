@@ -1,22 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AdMobControls, AdsDefaultsButton } from "@/components/RevenueControls";
+import { AdMobControls } from "@/components/RevenueControls";
 import { Badge, PageHeader, timeAgo } from "@/components/ui";
-import { adsStatus, normalizeConfig, type AdsStatus } from "@/lib/ads/config";
 import { listAdsConfigs } from "@/lib/ads/store";
 import { listGames } from "@/lib/games";
 import { ecpm, readAdMobEnv } from "@/lib/revenue/admob";
 import { revenueProviders } from "@/lib/revenue/providers";
 import { MigrationNotice } from "@/components/MigrationNotice";
-import { phase2Ready } from "@/lib/phase2";
+import { MIGRATION_ADS, schemaState } from "@/lib/schema";
 import { requireUser } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Revenue" };
 
-const ADS_BADGE: Record<AdsStatus, { tone: "muted" | "warn" | "bad" | "good"; text: string }> = {
-  not_configured: { tone: "muted", text: "Not configured" }, disabled: { tone: "muted", text: "Disabled" }, test: { tone: "warn", text: "Test mode" },
-  invalid: { tone: "bad", text: "Invalid" }, production_ready: { tone: "good", text: "Production IDs" },
-};
 const ERRORS: Record<string, string> = {
   config: "AdMob sign-in is not configured on the server (see README → AdMob).", denied: "Google sign-in was cancelled.", state: "The sign-in could not be verified. Try again.",
   token: "Google did not return a usable authorization. Try again and accept all requested permissions.",
@@ -34,7 +29,7 @@ const money = (micros: number, cur: string) => new Intl.NumberFormat("en", { sty
 export default async function RevenuePage({ searchParams }: { searchParams: Promise<{ admob?: string }> }) {
   const { admob } = await searchParams;
   const { supabase } = await requireUser();
-  if (!(await phase2Ready(supabase))) return <><PageHeader title="Revenue" subtitle="Only real data from AdMob appears here. Nothing is estimated or filled in." /><MigrationNotice what="Revenue and advertising" /></>;
+  if (!(await schemaState(supabase)).ads) return <><PageHeader title="Revenue" subtitle="Only real data from AdMob appears here. Nothing is estimated or filled in." /><MigrationNotice what="Revenue and advertising" file={MIGRATION_ADS} /></>;
   const env = readAdMobEnv();
   const providers = revenueProviders(supabase, env.ok);
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
@@ -83,16 +78,15 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
           <ul className="divide-y divide-line">
             {games.map((g) => {
               const cfg = cfgOf.get(g.id);
-              const st = adsStatus(cfg ? normalizeConfig(cfg) : null);
               const hasAppId = !!(cfg?.android?.app_id || cfg?.ios?.app_id);
               const a = agg.get(g.id);
               const cur = a && single ? single : null;
               return (
                 <li key={g.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm">
-                  <span className="min-w-0"><Link href={`/games/${g.id}`} className="font-medium hover:underline">{g.name}</Link> <Link href={`/games/${g.id}/ads`} className="ml-1"><Badge tone={ADS_BADGE[st].tone}>{ADS_BADGE[st].text}</Badge></Link>{g.monetization?.checked && !g.monetization.studio_ads?.module_version && <span className="ml-1"><Badge tone="muted" title="The shared ads module (com.studio.ads) is not in this game's repository">No ads module</Badge></span>}</span>
+                  <span className="min-w-0"><Link href={`/games/${g.id}`} className="font-medium hover:underline">{g.name}</Link></span>
                   <span className="text-xs text-muted">
                     {!connected ? <Badge tone="muted">Not connected</Badge>
-                      : !hasAppId ? <Badge tone="muted" title="Set the AdMob app ID in the game's advertising settings">No AdMob app ID</Badge>
+                      : !hasAppId ? <Badge tone="muted" title="Set the AdMob app ID on the Advertising page">No AdMob app ID</Badge>
                       : !a ? <Badge tone="muted">No data yet</Badge>
                       : cur ? <span className="text-fg">{money(a.e, cur)} · {a.i.toLocaleString()} imp · eCPM {ecpm(a.e, a.i) === null ? "—" : new Intl.NumberFormat("en", { style: "currency", currency: cur }).format(ecpm(a.e, a.i)!)} · to {a.last}</span>
                       : <Badge tone="warn">Mixed currencies</Badge>}
@@ -102,7 +96,6 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
             })}
           </ul>
         )}
-        <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3"><Link href="/games/ads-import" className="btn">Import AdMob IDs</Link><AdsDefaultsButton missing={games.filter((g) => !cfgOf.has(g.id)).length} /></div>
       </section>
     </>
   );

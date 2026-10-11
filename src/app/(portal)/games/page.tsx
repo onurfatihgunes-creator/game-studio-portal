@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AggregateBadge, MonetizationBadge } from "@/components/StatusBadges";
+import { MonetizationBadge } from "@/components/StatusBadges";
 import { RefreshAll } from "@/components/RefreshAll";
-import { Badge, EmptyState, PageHeader, timeAgo } from "@/components/ui";
-import { groupWorkflows, listGames, listWorkflows } from "@/lib/games";
-import { gameSummary } from "@/lib/status";
+import { EmptyState, PageHeader, timeAgo } from "@/components/ui";
+import { listGames } from "@/lib/games";
+import { monetizationSummary } from "@/lib/status";
 import { requireUser } from "@/lib/supabase/server";
 import { DEV_STATUS_LABEL, GAME_TYPE_LABEL } from "@/lib/types";
 
@@ -13,8 +13,7 @@ export const metadata: Metadata = { title: "Games" };
 export default async function GamesPage({ searchParams }: { searchParams: Promise<{ q?: string; type?: string }> }) {
   const { q = "", type = "" } = await searchParams;
   const { supabase } = await requireUser();
-  const [allGames, workflows] = await Promise.all([listGames(supabase), listWorkflows(supabase)]);
-  const byGame = groupWorkflows(workflows);
+  const allGames = await listGames(supabase);
 
   const needle = q.trim().toLowerCase();
   const games = allGames.filter(
@@ -58,17 +57,17 @@ export default async function GamesPage({ searchParams }: { searchParams: Promis
             <>
               {/* Desktop table */}
               <div className="card hidden overflow-x-auto md:block">
-                <table className="w-full min-w-[1100px] text-left text-sm">
+                <table className="w-full min-w-[720px] text-left text-sm">
                   <thead className="border-b border-line text-xs uppercase tracking-wide text-muted">
                     <tr>
-                      {["Game", "Type", "Status", "Latest commit", "Tests", "Build", "Android", "iOS", "Monetization", "Publishing", "CI"].map((h) => (
+                      {["Game", "Type", "Status", "Latest commit", "Ads"].map((h) => (
                         <th key={h} className="px-3 py-2.5 font-medium">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">
                     {games.map((g) => {
-                      const s = gameSummary(g, byGame.get(g.id) ?? []);
+                      const m = monetizationSummary(g);
                       return (
                         <tr key={g.id} className="hover:bg-surface-2/60">
                           <td className="px-3 py-2.5">
@@ -85,13 +84,7 @@ export default async function GamesPage({ searchParams }: { searchParams: Promis
                               </>
                             ) : <span className="text-muted">—</span>}
                           </td>
-                          <td className="px-3 py-2.5"><AggregateBadge value={s.tests} /></td>
-                          <td className="px-3 py-2.5"><AggregateBadge value={s.build} /></td>
-                          <td className="px-3 py-2.5"><AggregateBadge value={s.android} /></td>
-                          <td className="px-3 py-2.5"><AggregateBadge value={s.ios} /></td>
-                          <td className="px-3 py-2.5"><MonetizationBadge m={s.monetization} /></td>
-                          <td className="px-3 py-2.5"><AggregateBadge value={s.publishing} /></td>
-                          <td className="px-3 py-2.5">{(byGame.get(g.id) ?? []).some((w) => w.ci_ref) ? <Badge tone="good" title="Calls the shared unity-ci workflow">Onboarded</Badge> : <Badge tone="muted" title="No shared CI caller in this repository">Not onboarded</Badge>}</td>
+                          <td className="px-3 py-2.5"><MonetizationBadge m={m} /></td>
                         </tr>
                       );
                     })}
@@ -102,18 +95,13 @@ export default async function GamesPage({ searchParams }: { searchParams: Promis
               {/* Mobile cards */}
               <ul className="flex flex-col gap-3 md:hidden">
                 {games.map((g) => {
-                  const s = gameSummary(g, byGame.get(g.id) ?? []);
+                  const m = monetizationSummary(g);
                   return (
                     <li key={g.id} className="card p-4">
                       <Link href={`/games/${g.id}`} className="font-medium">{g.name}</Link>
                       <p className="text-xs text-muted">{g.full_name} · {GAME_TYPE_LABEL[g.game_type]} · {DEV_STATUS_LABEL[g.dev_status]}</p>
                       {g.commit_sha && <p className="mt-2 truncate text-sm">{g.commit_message}</p>}
-                      <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-                        {([["Tests", s.tests], ["Build", s.build], ["Android", s.android], ["iOS", s.ios], ["Publishing", s.publishing]] as const).map(([label, v]) => (
-                          <div key={label} className="flex items-center justify-between gap-2"><dt className="text-muted">{label}</dt><dd><AggregateBadge value={v} /></dd></div>
-                        ))}
-                        <div className="flex items-center justify-between gap-2"><dt className="text-muted">Monetization</dt><dd><MonetizationBadge m={s.monetization} /></dd></div>
-                      </dl>
+                      <p className="mt-3 text-xs"><MonetizationBadge m={m} /></p>
                     </li>
                   );
                 })}

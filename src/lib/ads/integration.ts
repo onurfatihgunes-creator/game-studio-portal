@@ -46,6 +46,17 @@ function idsOf(cfg: Pick<AdsConfig, "android" | "ios">): { id: string; where: st
   return out;
 }
 
+/** Platforms where the game has its OWN AdMob identifiers: a well-formed app ID plus at least one well-formed ad unit, none of them Google demo IDs. */
+export function ownIdPlatforms(cfg: Pick<AdsConfig, "android" | "ios"> | null | undefined): ("android" | "ios")[] {
+  if (!cfg) return [];
+  return (["android", "ios"] as const).filter((p) => {
+    const ids = cfg[p];
+    const app = !!ids.app_id && APP_ID_RE.test(ids.app_id) && !isDemoId(ids.app_id);
+    const units = [ids.rewarded, ids.interstitial, ids.banner].some((u) => !!u && UNIT_ID_RE.test(u) && !isDemoId(u));
+    return app && units;
+  });
+}
+
 export type Conflict = { id: string; where: string; otherGameId: string; otherName: string };
 
 /** An AdMob app or ad unit belongs to exactly one game. Google's shared demo IDs are exempt (every game may use them in test mode). */

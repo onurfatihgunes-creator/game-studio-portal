@@ -92,12 +92,9 @@ describe("scanRepository", () => {
     expect(scan.latestCommit).toMatchObject({ sha: "abcdef1234567", message: "Fix level 3", author: "Dev" });
     expect(scan.unity).toEqual({ detected: true, version: "6000.0.23f1", projectPath: "", note: null });
     expect(scan.docs.map((d) => d.path)).toEqual(["README.md", "docs/gdd.md"]);
-    expect(scan.monetization).toMatchObject({ checked: true, iap: true, admob: false });
-    expect(scan.workflows).toHaveLength(1);
-    expect(scan.workflows[0]).toMatchObject({ githubWorkflowId: 99, kinds: ["build"], platforms: ["android"], dispatchable: true });
-    expect(scan.workflows[0].latestRun).toMatchObject({ id: 5, conclusion: "success", branch: "main" });
-    // runs are requested for the default branch only
-    expect(calls.some((c) => c.includes("/runs?branch=main&per_page=1"))).toBe(true);
+    expect(scan.monetization).toMatchObject({ checked: true, admob: false });
+    // no CI/workflow data is read any more
+    expect(calls.some((c) => c.includes("/actions/") || c.includes(".github/workflows"))).toBe(false);
     // read-only: no write calls other than the token exchange
     expect(calls.filter((c) => !c.startsWith("GET") && !c.includes("access_tokens"))).toEqual([]);
   });
@@ -117,7 +114,6 @@ describe("scanRepository", () => {
     const scan = await scanRepository(config(), 7, "studio", "mini-one");
     expect(scan.unity).toMatchObject({ detected: false, version: null });
     expect(scan.docs).toEqual([]);
-    expect(scan.workflows).toEqual([]);
     expect(scan.monetization).toEqual({ checked: false });
   });
 

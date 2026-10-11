@@ -129,10 +129,7 @@ async function main() {
           const scan = await scanRepository(cfg.config, i.id, hit.owner, hit.name);
           ok(`scan ${scan.repo.fullName}: branch ${scan.repo.defaultBranch}, commit ${scan.latestCommit?.sha.slice(0, 7) ?? "none"}`);
           ok(`unity: ${scan.unity.detected ? (scan.unity.version ?? "version unreadable") : "Not detected"}`);
-          ok(`docs: ${scan.docs.length}, workflows: ${scan.workflows.length}, monetization checked: ${scan.monetization.checked}`);
-          for (const w of scan.workflows) {
-            ok(`workflow ${w.path} [${w.kinds.join("+") || "unclassified"}] latest run: ${w.latestRun ? `${w.latestRun.status}/${w.latestRun.conclusion}` : "none"}`);
-          }
+          ok(`docs: ${scan.docs.length}, monetization checked: ${scan.monetization.checked}`);
         }
       }
       if (target && !installs.length) bad(`cannot scan ${target}: no installation`);

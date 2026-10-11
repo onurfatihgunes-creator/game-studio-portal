@@ -76,7 +76,7 @@ export async function githubFetch(
   return res;
 }
 
-async function explain(res: Response, path: string): Promise<GitHubError> {
+export async function explain(res: Response, path: string): Promise<GitHubError> {
   let detail = "";
   try {
     const body = (await res.json()) as { message?: string };
@@ -110,38 +110,38 @@ export async function ghText(token: string, path: string): Promise<string | null
   return await res.text();
 }
 
-/** GET that expects a 302 and returns its Location (used for artifact downloads; the signed URL is short-lived). */
-export async function ghRedirectLocation(token: string, path: string): Promise<string | null> {
-  const res = await githubFetch(token, path, { redirect: "manual" });
-  if (res.status === 404 || res.status === 410) return null; // missing or expired artifact
-  const loc = res.headers.get("location");
-  if (res.status >= 300 && res.status < 400 && loc) return loc;
-  throw await explain(res, path);
-}
-
-export async function ghPostNoContent(token: string, path: string, body: unknown): Promise<void> {
-  const res = await githubFetch(token, path, {
-    method: "POST",
-    body: JSON.stringify(body),
-    headers: { "Content-Type": "application/json" },
-  });
+/** JSON request with a body (POST/PATCH/PUT). Used for the pull-request workflow; needs the App's write permissions. */
+export async function ghSend<T>(token: string, method: "POST" | "PATCH" | "PUT", path: string, body: unknown): Promise<T> {
+  const res = await githubFetch(token, path, { method, body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
   if (!res.ok) throw await explain(res, path);
+  return (res.status === 204 ? null : await res.json()) as T;
 }
 
 // ── tokens ──────────────────────────────────────────────────────────
-const tokenCache = new Map<number, { token: string; expiresAt: number }>();
+const tokenCache = new Map<number, { token: string; expiresAt: number; permissions: Record<string, string> }>();
 
-export async function getInstallationToken(config: GitHubConfig, installationId: number): Promise<string> {
+export type InstallationAccess = { token: string; permissions: Record<string, string> };
+
+/** Installation token plus the permissions GitHub actually granted (needed to tell "can write" from "read only"). */
+export async function getInstallationAccess(config: GitHubConfig, installationId: number): Promise<InstallationAccess> {
   const cached = tokenCache.get(installationId);
-  if (cached && cached.expiresAt - Date.now() > 60_000) return cached.token;
+  if (cached && cached.expiresAt - Date.now() > 60_000) return { token: cached.token, permissions: cached.permissions };
 
   const path = `/app/installations/${installationId}/access_tokens`;
   const res = await githubFetch(createAppJwt(config), path, { method: "POST" });
   if (!res.ok) throw await explain(res, path);
-  const body = (await res.json()) as { token: string; expires_at: string };
-  tokenCache.set(installationId, { token: body.token, expiresAt: Date.parse(body.expires_at) });
-  return body.token;
+  const body = (await res.json()) as { token: string; expires_at: string; permissions?: Record<string, string> };
+  const permissions = body.permissions ?? {};
+  tokenCache.set(installationId, { token: body.token, expiresAt: Date.parse(body.expires_at), permissions });
+  return { token: body.token, permissions };
 }
+
+export async function getInstallationToken(config: GitHubConfig, installationId: number): Promise<string> {
+  return (await getInstallationAccess(config, installationId)).token;
+}
+
+/** True when the installation may create branches/commits and pull requests. */
+export const canWritePullRequests = (p: Record<string, string>) => p.contents === "write" && p.pull_requests === "write";
 
 export type Installation = { id: number; account: string; accountType: string; repositorySelection: string };
 

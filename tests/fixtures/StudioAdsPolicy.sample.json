@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "policyVersion": 7,
+  "publishedAt": "2026-10-11T20:00:00.000Z",
+  "enabled": true,
+  "testMode": true,
+  "banner": { "enabled": true, "position": "bottom" },
+  "interstitial": { "minIntervalSec": 90, "maxPerSession": 6, "firstDelaySec": 60, "minRunsBeforeFirst": 3, "everyNRuns": 3 },
+  "rewarded": { "available": false, "cooldownSec": 0 }
+}

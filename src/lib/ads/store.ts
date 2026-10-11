@@ -1,6 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { type AdsConfig, normalizeConfig, testDefaults, validateConfig } from "./config";
+import { type AdsConfig, normalizeConfig, validateConfig } from "./config";
 import { findIdConflicts, parseIdImport, planImport, type PlanItem } from "./integration";
 
 type Db = SupabaseClient;
@@ -29,19 +29,6 @@ export async function saveAdsConfig(db: Db, gameId: string, input: Partial<AdsCo
   const { error } = await db.from("game_ads_config").upsert({ game_id: gameId, ...cfg, updated_at: new Date().toISOString(), updated_by_email: email }, { onConflict: "game_id" });
   if (error) throw new Error(error.message);
   return { problems };
-}
-
-/** Batch: give every listed game WITHOUT a config the safe test defaults (disabled, test mode, Google demo IDs). Never overwrites. */
-export async function applyTestDefaults(db: Db, gameIds: string[], email: string | null): Promise<number> {
-  if (gameIds.length === 0) return 0;
-  const { data: have, error } = await db.from("game_ads_config").select("game_id").in("game_id", gameIds);
-  if (error) throw new Error(error.message);
-  const existing = new Set((have ?? []).map((r) => r.game_id as string));
-  const rows = gameIds.filter((id) => !existing.has(id)).map((id) => ({ game_id: id, ...testDefaults(), updated_at: new Date().toISOString(), updated_by_email: email }));
-  if (rows.length === 0) return 0;
-  const { error: insErr } = await db.from("game_ads_config").insert(rows);
-  if (insErr) throw new Error(insErr.message);
-  return rows.length;
 }
 
 const namesOf = async (db: Db) => {

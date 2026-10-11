@@ -1,7 +1,4 @@
 import type { ProjectFacts } from "./project-facts";
-export type WorkflowKind = "test" | "build" | "publish";
-export type Platform = "android" | "ios";
-
 export type DocEntry = { path: string; kind: "readme" | "changelog" | "contributing" | "agent-guide" | "design" | "docs-folder" | "other" };
 
 export type Monetization = {
@@ -12,34 +9,6 @@ export type Monetization = {
   other_ads?: string[];
   /** shared Unity ads module (com.studio.ads) facts; absent = not scanned yet */
   studio_ads?: { module_version: string | null; config_file: boolean };
-};
-
-export type RunSummary = {
-  id: number;
-  number: number;
-  status: string | null;
-  conclusion: string | null;
-  event: string;
-  branch: string | null;
-  url: string;
-  startedAt: string | null;
-  updatedAt: string | null;
-};
-
-export type ScannedWorkflow = {
-  ciRef: string | null;
-  ciActions: string[];
-  githubWorkflowId: number | null;
-  name: string;
-  path: string;
-  state: string | null;
-  kinds: WorkflowKind[];
-  platforms: Platform[];
-  signals: string[];
-  triggers: string[];
-  dispatchable: boolean;
-  hasRequiredInputs: boolean;
-  latestRun: RunSummary | null;
 };
 
 export type ScanResult = {
@@ -61,6 +30,5 @@ export type ScanResult = {
   unity: { detected: boolean; version: string | null; projectPath: string | null; note: string | null };
   docs: DocEntry[];
   monetization: Monetization;
-  workflows: ScannedWorkflow[];
   projectFacts: ProjectFacts;
 };

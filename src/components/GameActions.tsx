@@ -66,7 +66,7 @@ export function GameActions({ game, pmEnabled }: { game: Pick<GameRow, "id" | "n
 
       <dialog ref={removeDlg} className="m-auto w-[min(92vw,28rem)] rounded-xl border border-line bg-surface p-5 text-fg backdrop:bg-black/50">
         <h2 className="text-base font-semibold">Remove “{game.name}” from the portal?</h2>
-        <p className="mt-2 text-sm text-muted">This deletes the portal record and its stored workflow status. The GitHub repository is not touched. You can reconnect it later.</p>
+        <p className="mt-2 text-sm text-muted">This deletes the portal record and its advertising settings for this game. The GitHub repository is not touched. You can reconnect it later.</p>
         <input className="input mt-3" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={game.name} aria-label="Type the game name to confirm" />
         <div className="mt-5 flex justify-end gap-2">
           <button className="btn" onClick={() => removeDlg.current?.close()}>Cancel</button>
