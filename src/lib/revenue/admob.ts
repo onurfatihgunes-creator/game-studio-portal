@@ -46,7 +46,7 @@ async function tokenCall(body: Record<string, string>): Promise<TokenResponse> {
   return json;
 }
 export class AdMobError extends Error {
-  constructor(message: string, readonly kind: "reauthorize" | "failed" = "failed") { super(message); this.name = "AdMobError"; }
+  constructor(message: string, readonly kind: "reauthorize" | "failed" | "api_disabled" | "forbidden" = "failed") { super(message); this.name = "AdMobError"; }
 }
 
 export const exchangeCode = (env: AdMobEnv, code: string, redirectUri: string, verifier: string) =>
@@ -64,8 +64,14 @@ export async function revokeToken(token: string): Promise<void> {
 async function api<T>(accessToken: string, path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, { ...init, cache: "no-store", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json", ...(init?.headers ?? {}) } });
   if (!res.ok) {
-    let detail = ""; try { detail = ((await res.json()) as { error?: { message?: string } }).error?.message ?? ""; } catch { /* not JSON */ }
-    throw new AdMobError(`AdMob API ${res.status}: ${detail || res.statusText}`, res.status === 401 ? "reauthorize" : "failed");
+    let detail = ""; let reason = "";
+    try {
+      const j = (await res.json()) as { error?: { message?: string; details?: { reason?: string }[] } };
+      detail = j.error?.message ?? ""; reason = j.error?.details?.find((d) => d.reason)?.reason ?? "";
+    } catch { /* not JSON */ }
+    // Google reports "API not enabled in the Cloud project" as 403 SERVICE_DISABLED / accessNotConfigured.
+    const disabled = reason === "SERVICE_DISABLED" || reason === "ACCESS_NOT_CONFIGURED" || /has not been used in project|is disabled|accessNotConfigured/i.test(detail);
+    throw new AdMobError(`AdMob API ${res.status}: ${detail || res.statusText}`, res.status === 401 ? "reauthorize" : disabled ? "api_disabled" : res.status === 403 ? "forbidden" : "failed");
   }
   return (await res.json()) as T;
 }

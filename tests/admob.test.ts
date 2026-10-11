@@ -6,9 +6,9 @@ import { buildAuthUrl, challengeFor, ecpm, lastDays, laDate, mapRowsToGames, par
 import { syncAdMob } from "@/lib/revenue/sync";
 import { memdb } from "./memdb";
 
-const h = vi.hoisted(() => ({ user: { email: "dev@studio.test" } as { email: string } | null, upserts: [] as any[] }));
+const h = vi.hoisted(() => ({ user: { email: "dev@studio.test" } as { email: string } | null, upserts: [] as any[], upsertError: null as { message: string } | null }));
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ auth: { getUser: async () => ({ data: { user: h.user } }) }, from: () => ({ upsert: async (r: any) => (h.upserts.push(r), { error: null }) }) }),
+  createClient: async () => ({ auth: { getUser: async () => ({ data: { user: h.user } }) }, from: () => ({ upsert: async (r: any) => (h.upserts.push(r), { error: h.upsertError }) }) }),
 }));
 
 const KEY = randomBytes(32).toString("base64");
@@ -169,5 +169,73 @@ describe("OAuth routes", () => {
     expect(h.upserts[0]).toMatchObject({ id: 1, publisher_id: "pub-1111222233334444", connected_by_email: "dev@studio.test" });
     expect(h.upserts[0].token_ciphertext).not.toContain("secret-refresh");
     expect(decryptSecret(h.upserts[0].token_ciphertext, KEY)).toBe("1//secret-refresh");
+  });
+});
+
+describe("OAuth callback reports the REAL failing stage (and never logs secrets)", () => {
+  const SECRET_CODE = "4/0AVERYSECRETAUTHCODE", SECRET_REFRESH = "1//SECRETREFRESHTOKEN";
+  const run = async (opts: { tokenResponse?: Record<string, unknown>; tokenStatus?: number; accounts?: { status: number; body: unknown } }) => {
+    h.user = { email: "dev@studio.test" }; h.upserts.length = 0; h.upsertError = null;
+    process.env.GOOGLE_OAUTH_CLIENT_ID = "cid"; process.env.GOOGLE_OAUTH_CLIENT_SECRET = "sec"; process.env.ADMOB_TOKEN_ENCRYPTION_KEY = KEY;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/token")) {
+        const b = String(init!.body);
+        if (b.includes("authorization_code")) return json(opts.tokenResponse ?? { access_token: "a", refresh_token: SECRET_REFRESH, scope: ADMOB_SCOPES.join(" ") }, opts.tokenStatus ?? 200);
+        return json({ access_token: "a2" });
+      }
+      if (url.endsWith("/accounts")) return json(opts.accounts?.body ?? { account: [{ publisherId: "pub-1111222233334444" }] }, opts.accounts?.status ?? 200);
+      return json({}, 404);
+    }));
+    const { GET } = await import("@/app/api/integrations/admob/callback/route");
+    const res = await GET(new NextRequest(`http://localhost:3000/api/integrations/admob/callback?code=${SECRET_CODE}&state=s1`, { headers: { cookie: "admob_oauth=s1.verifier123" } }));
+    const logs = warn.mock.calls.map((c) => c.join(" ")).join("\n"); warn.mockRestore();
+    return { code: new URL(res.headers.get("location")!).searchParams.get("admob"), logs };
+  };
+
+  it("code exchange rejected → exchange", async () => {
+    const r = await run({ tokenResponse: { error: "invalid_grant", error_description: "Bad Request" }, tokenStatus: 400 });
+    expect(r.code).toBe("exchange"); expect(r.logs).toMatch(/code exchange.*invalid_grant/);
+  });
+  it("no refresh token → no_refresh; missing scope → scope", async () => {
+    expect((await run({ tokenResponse: { access_token: "a", scope: ADMOB_SCOPES.join(" ") } })).code).toBe("no_refresh");
+    const r = await run({ tokenResponse: { access_token: "a", refresh_token: SECRET_REFRESH, scope: ADMOB_SCOPES[0] } });
+    expect(r.code).toBe("scope"); expect(r.logs).toMatch(/missing admob\.report/);
+  });
+  it("AdMob API not enabled in the Cloud project → api_disabled", async () => {
+    const body = { error: { code: 403, message: "AdMob API has not been used in project 212433233685 before or it is disabled.", details: [{ reason: "SERVICE_DISABLED" }] } };
+    const r = await run({ accounts: { status: 403, body } });
+    expect(r.code).toBe("api_disabled"); expect(r.logs).toMatch(/AdMob accounts\.list.*has not been used/);
+  });
+  it("other 403 → forbidden; 500 → api_failed; no AdMob account → account", async () => {
+    expect((await run({ accounts: { status: 403, body: { error: { message: "The caller does not have permission" } } } })).code).toBe("forbidden");
+    expect((await run({ accounts: { status: 500, body: { error: { message: "backend" } } } })).code).toBe("api_failed");
+    const r = await run({ accounts: { status: 200, body: {} } });
+    expect(r.code).toBe("account"); expect(r.logs).toMatch(/no AdMob account/);
+  });
+  it("database save failure → storage; success → connected", async () => {
+    h.upsertError = null;
+    expect((await run({})).code).toBe("connected");
+    const r = await (async () => { const ok = await run({}); return ok; })();
+    expect(r.code).toBe("connected");
+    // storage failure
+    h.user = { email: "dev@studio.test" };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    h.upsertError = { message: 'relation "admob_connection" does not exist' };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/token")) return json(String(init!.body).includes("authorization_code") ? { access_token: "a", refresh_token: SECRET_REFRESH, scope: ADMOB_SCOPES.join(" ") } : { access_token: "a2" });
+      return json({ account: [{ publisherId: "pub-1" }] });
+    }));
+    const { GET } = await import("@/app/api/integrations/admob/callback/route");
+    const res = await GET(new NextRequest(`http://localhost:3000/api/integrations/admob/callback?code=${SECRET_CODE}&state=s1`, { headers: { cookie: "admob_oauth=s1.verifier123" } }));
+    expect(res.headers.get("location")).toContain("admob=storage");
+    warn.mockRestore(); h.upsertError = null;
+  });
+  it("never writes the authorization code, tokens or secrets to the log", async () => {
+    const outs: string[] = [];
+    for (const o of [{ tokenResponse: { error: "invalid_grant" }, tokenStatus: 400 }, { accounts: { status: 403, body: { error: { message: "x", details: [{ reason: "SERVICE_DISABLED" }] } } } }]) outs.push((await run(o)).logs);
+    for (const l of outs) { expect(l).not.toContain(SECRET_CODE); expect(l).not.toContain(SECRET_REFRESH); expect(l).not.toContain("sec"); expect(l).not.toContain(KEY); }
   });
 });

@@ -33,7 +33,7 @@ export async function syncAdMob(db: Db, env: AdMobEnv, days = 30): Promise<SyncR
     await db.from("admob_connection").update({ last_synced_at: new Date().toISOString(), last_error: null }).eq("id", 1);
     return { days, rows: report.rows.length, gamesWithData: new Set(daily.map((d) => d.game_id)).size, unmatched, truncated: report.truncated, currency: report.currency };
   } catch (e) {
-    const message = e instanceof AdMobError && e.kind === "reauthorize" ? "Google rejected the stored authorization. Disconnect and connect AdMob again." : e instanceof Error ? e.message : "Sync failed";
+    const message = e instanceof AdMobError && e.kind === "reauthorize" ? "Google rejected the stored authorization. Disconnect and connect AdMob again." : e instanceof AdMobError && e.kind === "api_disabled" ? "The AdMob API is not enabled in the Google Cloud project. Enable it, then Sync again." : e instanceof Error ? e.message : "Sync failed";
     await fail(message);
     throw new Error(message);
   }

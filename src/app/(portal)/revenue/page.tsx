@@ -19,7 +19,13 @@ const ADS_BADGE: Record<AdsStatus, { tone: "muted" | "warn" | "bad" | "good"; te
 };
 const ERRORS: Record<string, string> = {
   config: "AdMob sign-in is not configured on the server (see README → AdMob).", denied: "Google sign-in was cancelled.", state: "The sign-in could not be verified. Try again.",
-  token: "Google did not return a usable authorization. Try again and accept all requested permissions.", scope: "Both read-only AdMob permissions are required. Try again and leave them ticked.",
+  token: "Google did not return a usable authorization. Try again and accept all requested permissions.",
+  exchange: "Google rejected the sign-in code. Try Connect AdMob again; if it repeats, check the OAuth client in Google Cloud.",
+  no_refresh: "Google did not issue a long-lived authorization. Remove this app at myaccount.google.com/permissions, then connect again.",
+  api_disabled: "The AdMob API is not enabled in your Google Cloud project. Enable it (APIs & Services ▸ Library ▸ AdMob API), wait a minute, then connect again.",
+  forbidden: "Google refused AdMob access for this account (HTTP 403). Use the Google account that owns the AdMob account and accept both permissions.",
+  api_failed: "The AdMob API request failed. Try again in a moment; details are in the server log ([admob] lines).",
+  storage: "The authorization worked but could not be saved. Details are in the server log ([admob] lines).", scope: "Both read-only AdMob permissions are required. Try again and leave them ticked.",
   account: "No AdMob account was found for that Google user.",
 };
 const money = (micros: number, cur: string) => new Intl.NumberFormat("en", { style: "currency", currency: cur }).format(micros / 1e6);
