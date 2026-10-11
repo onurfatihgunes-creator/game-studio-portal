@@ -69,6 +69,7 @@ export function AdsForm({ gameId, gameName, initial, saved, status, androidId, i
           <Num label="Interstitial: max per session" value={cfg.caps.interstitial_max_per_session} max={100} onChange={(n) => set("caps", { ...cfg.caps, interstitial_max_per_session: n })} />
           <Num label="Interstitial: first delay (s)" value={cfg.caps.interstitial_first_delay_s} max={3600} onChange={(n) => set("caps", { ...cfg.caps, interstitial_first_delay_s: n })} />
           <Num label="Interstitial: runs before the first" value={cfg.caps.interstitial_min_runs_before_first} max={50} onChange={(n) => set("caps", { ...cfg.caps, interstitial_min_runs_before_first: n })} />
+          <Num label="Interstitial: at most once per N runs" value={cfg.caps.interstitial_every_n_runs} max={50} onChange={(n) => set("caps", { ...cfg.caps, interstitial_every_n_runs: n })} />
           <Num label="Rewarded: cooldown (s)" value={cfg.caps.rewarded_cooldown_s} max={3600} onChange={(n) => set("caps", { ...cfg.caps, rewarded_cooldown_s: n })} />
           <label className="text-sm font-medium">Banner
             <span className="mt-1 flex items-center gap-2"><input type="checkbox" checked={cfg.banner_enabled} onChange={(e) => set("banner_enabled", e.target.checked)} /> enabled

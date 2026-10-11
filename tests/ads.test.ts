@@ -9,7 +9,7 @@ import { memdb } from "./memdb";
 const PROD = normalizeConfig({
   enabled: true, test_mode: false,
   android: { app_id: "ca-app-pub-1111222233334444~1234567890", rewarded: "ca-app-pub-1111222233334444/1111111111", interstitial: "ca-app-pub-1111222233334444/2222222222" },
-  caps: { interstitial_min_interval_s: 120, interstitial_max_per_session: 5, interstitial_first_delay_s: 45, interstitial_min_runs_before_first: 3, rewarded_cooldown_s: 10 },
+  caps: { interstitial_min_interval_s: 120, interstitial_max_per_session: 5, interstitial_first_delay_s: 45, interstitial_min_runs_before_first: 3, interstitial_every_n_runs: 2, rewarded_cooldown_s: 10 },
   consent: { tag_child_directed: false, tag_under_age_of_consent: true, max_ad_content_rating: "PG" },
 });
 const errors = (c: ReturnType<typeof emptyConfig>) => validateConfig(c).filter((p) => p.level === "error");
@@ -42,6 +42,12 @@ describe("ads config validation", () => {
     expect(errors(demo).some((e) => /demo ID/.test(e.message))).toBe(true);
     expect(errors({ ...PROD, android: { rewarded: PROD.android.rewarded } }).some((e) => /app ID/.test(e.message))).toBe(true);
     expect(errors({ ...PROD, android: { app_id: PROD.android.app_id } }).some((e) => /at least one ad unit/.test(e.message))).toBe(true);
+  });
+  it("every-N-runs defaults to 1 (every run) and never goes below 1", () => {
+    expect(normalizeConfig({}).caps.interstitial_every_n_runs).toBe(1);
+    expect(normalizeConfig({ caps: { interstitial_every_n_runs: 0 } as never }).caps.interstitial_every_n_runs).toBe(1);
+    expect(normalizeConfig({ caps: { interstitial_every_n_runs: 3 } as never }).caps.interstitial_every_n_runs).toBe(3);
+    expect(exportForUnity(normalizeConfig({ caps: { interstitial_every_n_runs: 3 } as never })).caps.interstitialEveryNRuns).toBe(3);
   });
   it("normalizes untrusted input: trims, clamps, defaults to test mode", () => {
     const n = normalizeConfig({ android: { rewarded: "  ca-app-pub-1111222233334444/1111111111  " }, caps: { interstitial_min_interval_s: -5, interstitial_max_per_session: 99999 } as never });

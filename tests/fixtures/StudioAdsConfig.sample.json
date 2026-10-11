@@ -23,6 +23,7 @@
     "interstitialMaxPerSession": 5,
     "interstitialFirstDelaySec": 45,
     "interstitialMinRunsBeforeFirst": 3,
+    "interstitialEveryNRuns": 2,
     "rewardedCooldownSec": 10
   },
   "consent": {

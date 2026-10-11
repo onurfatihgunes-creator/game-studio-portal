@@ -8,6 +8,8 @@ export type Caps = {
   interstitial_max_per_session: number;
   interstitial_first_delay_s: number;
   interstitial_min_runs_before_first: number;
+  /** eligible only after this many completed runs since the last interstitial (1 = every run) */
+  interstitial_every_n_runs: number;
   rewarded_cooldown_s: number;
 };
 export type Consent = { tag_child_directed: boolean; tag_under_age_of_consent: boolean; max_ad_content_rating: "" | "G" | "PG" | "T" | "MA" };
@@ -28,6 +30,7 @@ export const DEFAULT_CAPS: Caps = {
   interstitial_max_per_session: 6,
   interstitial_first_delay_s: 60,
   interstitial_min_runs_before_first: 2,
+  interstitial_every_n_runs: 1,
   rewarded_cooldown_s: 0,
 };
 export const DEFAULT_CONSENT: Consent = { tag_child_directed: false, tag_under_age_of_consent: false, max_ad_content_rating: "" };
@@ -84,6 +87,7 @@ export function normalizeConfig(input: Partial<AdsConfig> | null | undefined): A
       interstitial_max_per_session: clamp(c.interstitial_max_per_session ?? DEFAULT_CAPS.interstitial_max_per_session, 0, 100),
       interstitial_first_delay_s: clamp(c.interstitial_first_delay_s ?? DEFAULT_CAPS.interstitial_first_delay_s, 0, 3600),
       interstitial_min_runs_before_first: clamp(c.interstitial_min_runs_before_first ?? DEFAULT_CAPS.interstitial_min_runs_before_first, 0, 50),
+      interstitial_every_n_runs: Math.max(1, clamp(c.interstitial_every_n_runs ?? DEFAULT_CAPS.interstitial_every_n_runs, 0, 50)),
       rewarded_cooldown_s: clamp(c.rewarded_cooldown_s ?? DEFAULT_CAPS.rewarded_cooldown_s, 0, 3600),
     },
     consent: {
@@ -154,6 +158,7 @@ export function exportForUnity(cfg: AdsConfig) {
       interstitialMaxPerSession: cfg.caps.interstitial_max_per_session,
       interstitialFirstDelaySec: cfg.caps.interstitial_first_delay_s,
       interstitialMinRunsBeforeFirst: cfg.caps.interstitial_min_runs_before_first,
+      interstitialEveryNRuns: cfg.caps.interstitial_every_n_runs,
       rewardedCooldownSec: cfg.caps.rewarded_cooldown_s,
     },
     consent: {
