@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 type Step = { name: string; ok: boolean; detail: string };
 type Result = { supabase?: { ok: boolean; error?: string; games?: number }; github?: { ok: boolean; error?: string }; deep?: Step[]; exercise?: Step[] };
@@ -28,27 +28,49 @@ export function SystemCheck({ defaultRepo, canExercise }: { defaultRepo: string;
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const run = (query: string) => start(async () => {
-    setError(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [label, setLabel] = useState("");
+
+  // Show the last result again after a reload (the server also logs every run with a [selftest] prefix).
+  useEffect(() => {
+    try { const saved = sessionStorage.getItem("system-check-last"); if (saved) setResult(JSON.parse(saved) as Result); } catch { /* storage unavailable */ }
+  }, []);
+  // Visible heartbeat so a long run never looks frozen.
+  useEffect(() => {
+    if (!pending) return;
+    setElapsed(0);
+    const t = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(t);
+  }, [pending]);
+
+  const run = (query: string, what: string) => start(async () => {
+    setError(null); setLabel(what);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 6 * 60_000); // never wait forever
     try {
-      const res = await fetch(`/api/health?${query}`, { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setResult((await res.json()) as Result);
+      const res = await fetch(`/api/health?${query}`, { cache: "no-store", signal: ctl.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}${res.status === 401 ? " (session expired — sign in again)" : ""}`);
+      const json = (await res.json()) as Result;
+      setResult(json);
+      try { sessionStorage.setItem("system-check-last", JSON.stringify(json)); } catch { /* ignore */ }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Request failed");
+      setError(e instanceof DOMException && e.name === "AbortError" ? "Timed out after 6 minutes. Check the dev-server log for [selftest] lines." : e instanceof Error ? e.message : "Request failed");
+    } finally {
+      clearTimeout(timer);
     }
   });
 
   return (
     <>
       <div className="card flex flex-wrap items-center gap-2 p-4">
-        <button className="btn btn-primary" disabled={pending} onClick={() => run("deep=1")}>{pending ? "Running…" : "Run checks"}</button>
+        <button className="btn btn-primary" disabled={pending} onClick={() => run("deep=1", "checks")}>{pending && label === "checks" ? `Running… ${elapsed}s` : "Run checks"}</button>
         {canExercise && (
           <>
             <input className="input max-w-xs" value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/repo (a Unity repo with the shared CI)" aria-label="Repository for the end-to-end test" />
-            <button className="btn" disabled={pending || !/^[\w.-]+\/[\w.-]+$/.test(repo)} onClick={() => run(`deep=1&exercise=${encodeURIComponent(repo)}`)}>Run end-to-end test</button>
+            <button className="btn" disabled={pending || !/^[\w.-]+\/[\w.-]+$/.test(repo)} onClick={() => run(`exercise=${encodeURIComponent(repo)}`, "e2e")}>{pending && label === "e2e" ? `Running… ${elapsed}s` : "Run end-to-end test"}</button>
           </>
         )}
+        {pending && <p role="status" className="w-full text-sm text-muted">{label === "e2e" ? "The end-to-end test usually takes 30–90 seconds (up to ~2 minutes on the first run while the dev server compiles pages). Keep this tab open; the result appears here and in the server log." : "Checking every page with your session — about 30 seconds on the dev server."}</p>}
         <p className="w-full text-xs text-muted">“Run checks” is read-only. The end-to-end test (development server only) connects the repo temporarily, dispatches the Unity-free self-test (~15 s of hosted minutes), checks results, artifact download and advertising config, then removes the test game again. It never runs Unity.</p>
       </div>
       {error && <p role="alert" className="mt-4 text-sm text-[var(--bad-fg)]">{error}</p>}

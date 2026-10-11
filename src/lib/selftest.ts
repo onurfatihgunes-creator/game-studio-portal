@@ -104,7 +104,7 @@ export async function exercise(db: SupabaseClient, repoFullName: string, origin:
 
     let run = (await listBuildRuns(db, { gameId, limit: 50 })).find((r) => !before.has(r.github_run_id) && r.action === "smoke");
     while (Date.now() - t0 < 4 * 60_000 && (!run || run.status !== "completed")) {
-      await new Promise((r) => setTimeout(r, 6000));
+      await new Promise((r) => setTimeout(r, 3000));
       await syncBuilds(db, gameId);
       run = (await listBuildRuns(db, { gameId, limit: 50 })).find((r) => !before.has(r.github_run_id) && r.action === "smoke");
     }
