@@ -89,7 +89,7 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
               const cur = a && single ? single : null;
               return (
                 <li key={g.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm">
-                  <span className="min-w-0"><Link href={`/games/${g.id}`} className="font-medium hover:underline">{g.name}</Link> <Link href={`/games/${g.id}/ads`} className="ml-1"><Badge tone={ADS_BADGE[st].tone}>{ADS_BADGE[st].text}</Badge></Link></span>
+                  <span className="min-w-0"><Link href={`/games/${g.id}`} className="font-medium hover:underline">{g.name}</Link> <Link href={`/games/${g.id}/ads`} className="ml-1"><Badge tone={ADS_BADGE[st].tone}>{ADS_BADGE[st].text}</Badge></Link>{g.monetization?.checked && !g.monetization.studio_ads?.module_version && <span className="ml-1"><Badge tone="muted" title="The shared ads module (com.studio.ads) is not in this game's repository">No ads module</Badge></span>}</span>
                   <span className="text-xs text-muted">
                     {!connected ? <Badge tone="muted">Not connected</Badge>
                       : !hasAppId ? <Badge tone="muted" title="Set the AdMob app ID in the game's advertising settings">No AdMob app ID</Badge>
@@ -102,7 +102,7 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
             })}
           </ul>
         )}
-        <div className="border-t border-line px-4 py-3"><AdsDefaultsButton missing={games.filter((g) => !cfgOf.has(g.id)).length} /></div>
+        <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3"><Link href="/games/ads-import" className="btn">Import AdMob IDs</Link><AdsDefaultsButton missing={games.filter((g) => !cfgOf.has(g.id)).length} /></div>
       </section>
     </>
   );

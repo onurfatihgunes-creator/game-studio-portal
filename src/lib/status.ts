@@ -54,6 +54,7 @@ export function monetizationSummary(game: Pick<GameRow, "monetization" | "unity_
   const items: string[] = [];
   if (m.admob) items.push("AdMob SDK");
   if (m.iap) items.push("Unity IAP");
+  if (m.studio_ads?.module_version) items.push("Studio ads module");
   for (const o of m.other_ads ?? []) items.push(o);
   return items.length ? { state: "detected", items } : { state: "not_configured", items };
 }

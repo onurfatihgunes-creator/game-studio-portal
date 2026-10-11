@@ -10,6 +10,8 @@ export type Monetization = {
   admob?: boolean;
   iap?: boolean;
   other_ads?: string[];
+  /** shared Unity ads module (com.studio.ads) facts; absent = not scanned yet */
+  studio_ads?: { module_version: string | null; config_file: boolean };
 };
 
 export type RunSummary = {

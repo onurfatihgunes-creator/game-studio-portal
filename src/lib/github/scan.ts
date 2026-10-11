@@ -7,7 +7,8 @@ import {
 } from "./app";
 import { parseProjectSettings } from "./project-facts";
 import { classifyWorkflow, detectMonetization, docKind, parseUnityVersion } from "./classify";
-import type { DocEntry, RunSummary, ScanResult, ScannedWorkflow } from "./types";
+import { CONFIG_PATH, detectStudioAds, MODULE_PACKAGE } from "@/lib/ads/integration";
+import type { DocEntry, Monetization, RunSummary, ScanResult, ScannedWorkflow } from "./types";
 
 type RawRepo = {
   id: number;
@@ -93,10 +94,16 @@ export async function scanRepository(
   const docs = await detectDocs(token, base, root);
 
   // ── Monetization SDKs ─────────────────────────────────────────────
-  const manifestPath = `${unity.projectPath ? unity.projectPath + "/" : ""}Packages/manifest.json`;
-  const monetization = unity.detected
-    ? detectMonetization(await ghText(token, `${base}/contents/${enc(manifestPath)}`))
-    : { checked: false };
+  const prefix = unity.projectPath ? unity.projectPath + "/" : "";
+  const manifestText = unity.detected ? await ghText(token, `${base}/contents/${enc(`${prefix}Packages/manifest.json`)}`) : null;
+  const monetization: Monetization = unity.detected ? detectMonetization(manifestText) : { checked: false };
+  if (unity.detected && monetization.checked) {
+    const [packageJson, configJson] = await Promise.all([
+      ghText(token, `${base}/contents/${enc(`${prefix}Packages/${MODULE_PACKAGE}/package.json`)}`),
+      ghText(token, `${base}/contents/${enc(`${prefix}${CONFIG_PATH}`)}`),
+    ]);
+    monetization.studio_ads = detectStudioAds({ packageJson, manifest: manifestText, configJson });
+  }
 
   // ── Project facts (versions, bundle ids, signing flags) ───────────
   const projectFacts = unity.detected
