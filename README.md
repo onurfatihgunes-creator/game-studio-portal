@@ -19,7 +19,7 @@ Advertising → **Apply to All Games** does, for every connected Unity game and 
 
 Rules the engine enforces (and the tests prove):
 
-- Each game gets **only its own AdMob IDs** (from its saved Advertising settings). An ID already used by another game is refused. A game without its own IDs is *Needs AdMob IDs*; nothing is invented and no pull request is made.
+- Each game gets **only its own AdMob IDs** (from its saved Advertising settings). An ID already used by another game is refused. A game without its own IDs still gets the module and a **disabled configuration with empty identifiers** (so onboarding doesn't wait for AdMob) and stays *Needs AdMob IDs*; nothing is invented, copied or borrowed. When the game's own IDs are saved, the next Apply fills only the **empty** identifier fields in the same pull request and never replaces a non-empty one.
 - New integrations ship **disabled and in test mode**. Existing files and configs are never overwritten: managed module files are replaced only when the module is older; in an existing config only *missing* keys are added.
 - Re-running creates **no duplicate pull request or commit**. A pull request made by the earlier onboarding tool (branch `studio-ci-onboarding`) is recognised and updated instead of duplicated. A closed integration branch is not recreated.
 - *Applied* means the integration is on the game's default branch and the remote policy is configured. It does **not** mean a build containing it has reached players — that is not tracked.

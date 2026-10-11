@@ -71,30 +71,52 @@ export function mergeConfigAdditive(existing: string, add: Record<string, unknow
   return { text: changed ? JSON.stringify(obj, null, 2) + "\n" : existing, changed };
 }
 
+const ID_KEYS = [["appId", "app_id"], ["rewarded", "rewarded"], ["interstitial", "interstitial"], ["banner", "banner"]] as const;
+
+/**
+ * Writes the game's OWN identifiers into a config that still has them EMPTY (the safe, disabled config prepared before the IDs existed).
+ * A non-empty value is never replaced, and only platforms where the game really has its own IDs are touched.
+ */
+export function fillEmptyIds(existing: string, own: AdsConfig | null): { text: string; changed: boolean } {
+  let obj: Record<string, Record<string, string> | unknown>;
+  try { obj = JSON.parse(existing) as Record<string, unknown>; } catch { return { text: existing, changed: false }; }
+  let changed = false;
+  for (const p of ownIdPlatforms(own)) {
+    const section = ((obj[p] as Record<string, string> | undefined) ??= {});
+    for (const [unityKey, ourKey] of ID_KEYS) {
+      const mine = (own![p] as Record<string, string | undefined>)[ourKey];
+      if (mine && !section[unityKey]) { section[unityKey] = mine; changed = true; }
+    }
+  }
+  return { text: changed ? JSON.stringify(obj, null, 2) + "\n" : existing, changed };
+}
+
 /** The config for a NEW integration: this game's own IDs, disabled, test mode, policy baseline. */
-export function buildNewConfig(own: AdsConfig, policy: AdsPolicy, remoteUrl: string): string {
+export function buildNewConfig(own: AdsConfig | null, policy: AdsPolicy, remoteUrl: string): string {
+  // a game with no IDs yet gets a safe, disabled configuration with EMPTY identifiers; nothing is invented or borrowed
   const cfg = normalizeConfig({
     enabled: false, test_mode: true,
     banner_enabled: policy.banner_enabled, banner_position: policy.banner_position,
-    android: own.android, ios: own.ios, caps: policyCaps(policy), consent: own.consent,
+    android: ownIdPlatforms(own).includes("android") ? own!.android : {}, ios: ownIdPlatforms(own).includes("ios") ? own!.ios : {},
+    caps: policyCaps(policy), consent: own?.consent,
   });
   return JSON.stringify(exportForUnity(cfg, { remotePolicyUrl: remoteUrl, rewardedAvailable: policy.rewarded_available }), null, 2) + "\n";
 }
 
 const isOurs = (p: PullRequest) => p.head === INTEGRATION_BRANCH || LEGACY_BRANCHES.includes(p.head) || p.body.includes(PR_MARKER);
 
-type RefState = { version: string | null; configText: string | null; remoteUrl: string | null };
+type RefState = { version: string | null; configText: string | null; remoteUrl: string | null; needsIds: boolean };
 
-async function inspectRef(git: RepoGit, ref: string, root: string): Promise<RefState> {
+async function inspectRef(git: RepoGit, ref: string, root: string, own: AdsConfig | null): Promise<RefState> {
   const [pkg, cfg] = await Promise.all([git.readFile(`${root}${MODULE_DIR}package.json`, ref), git.readFile(`${root}${CONFIG_PATH}`, ref)]);
   let version: string | null = null;
   try { const v = pkg ? (JSON.parse(pkg) as { name?: string; version?: string }) : null; if (v?.name === "com.studio.ads") version = v.version ?? "0.0.0"; } catch { /* unreadable */ }
   let remoteUrl: string | null = null;
   try { const u = cfg ? (JSON.parse(cfg) as { remotePolicyUrl?: string }).remotePolicyUrl : null; remoteUrl = typeof u === "string" && u ? u : null; } catch { /* unreadable */ }
-  return { version, configText: cfg, remoteUrl };
+  return { version, configText: cfg, remoteUrl, needsIds: !!cfg && fillEmptyIds(cfg, own).changed };
 }
 
-const upToDate = (s: RefState, bundle: ModuleBundle) => !!s.version && cmpVersion(s.version, bundle.version) >= 0 && !!s.remoteUrl;
+const upToDate = (s: RefState, bundle: ModuleBundle) => !!s.version && cmpVersion(s.version, bundle.version) >= 0 && !!s.remoteUrl && !s.needsIds;
 
 /** Game-specific placement hooks: declared in Assets/StudioAds/StudioAdsPlacements.json AND the declared file exists. */
 async function readHooks(git: RepoGit, root: string, ref: string): Promise<boolean> {
@@ -106,7 +128,7 @@ async function readHooks(git: RepoGit, root: string, ref: string): Promise<boole
   } catch { return false; }
 }
 
-async function planFiles(deps: ApplyDeps, game: ApplyGame, own: AdsConfig, ref: string, root: string, state: RefState): Promise<{ files: FileChange[]; summary: string[] }> {
+async function planFiles(deps: ApplyDeps, game: ApplyGame, own: AdsConfig | null, ref: string, root: string, state: RefState): Promise<{ files: FileChange[]; summary: string[] }> {
   const { git, bundle, policy, remoteUrl } = deps;
   const listing = await git.listPaths(ref);
   const exists = async (p: string) => listing.complete ? listing.paths.includes(p) : (await git.readFile(p, ref)) !== null;
@@ -137,11 +159,15 @@ async function planFiles(deps: ApplyDeps, game: ApplyGame, own: AdsConfig, ref: 
     files.push({ path: root + CONFIG_PATH + ".meta", content: meta(guid(game.full_name, CONFIG_PATH), "text") });
     const resourcesUsed = listing.paths.some((p) => p.startsWith(`${root}Assets/Resources/`));
     if (!resourcesUsed && !(await exists(`${root}Assets/Resources.meta`))) files.push({ path: `${root}Assets/Resources.meta`, content: meta(guid(game.full_name, "Assets/Resources"), "folder") });
-    summary.push("a DISABLED, test-mode StudioAdsConfig.json with this game's own AdMob IDs");
+    summary.push(ownIdPlatforms(own).length ? "a DISABLED, test-mode StudioAdsConfig.json with this game's own AdMob IDs" : "a DISABLED, test-mode StudioAdsConfig.json with EMPTY AdMob identifiers (this game has none yet; they are filled in later, never borrowed)");
   } else {
     const add: Record<string, unknown> = { remotePolicyUrl: remoteUrl, rewardedAvailable: policy.rewarded_available };
     const merged = mergeConfigAdditive(state.configText, add);
-    if (merged.changed) { files.push({ path: root + CONFIG_PATH, content: merged.text }); summary.push("adds the remote-policy keys to the existing config (no existing value changed)"); }
+    const filled = fillEmptyIds(merged.text, own);
+    if (merged.changed || filled.changed) {
+      files.push({ path: root + CONFIG_PATH, content: filled.text });
+      summary.push([merged.changed && "adds the remote-policy keys to the existing config", filled.changed && "fills this game's own AdMob IDs where the config still had them empty"].filter(Boolean).join("; ") + " (no existing value changed)");
+    }
   }
 
   // 4. new integrations only: the Google plugin in the manifest and an (empty) placements declaration
@@ -160,7 +186,7 @@ async function planFiles(deps: ApplyDeps, game: ApplyGame, own: AdsConfig, ref: 
   return { files, summary };
 }
 
-function prBody(game: ApplyGame, bundle: ModuleBundle, summary: string[], remoteUrl: string, fresh: boolean): string {
+function prBody(game: ApplyGame, bundle: ModuleBundle, summary: string[], remoteUrl: string, fresh: boolean, hasIds: boolean): string {
   return `${PR_MARKER}
 ## Shared advertising module for ${game.name}
 
@@ -171,7 +197,7 @@ ${summary.map((s) => `- ${s}`).join("\n")}
 
 **Safety**
 - Ads stay **disabled** and in **test mode** (Google demo ads only). Production ads need a separate, explicit change.
-- Only this game's own AdMob identifiers are used. No other game's identifiers are involved.
+- ${hasIds ? "Only this game's own AdMob identifiers are used." : "This game has no AdMob identifiers yet, so none are written (they stay empty until the game's own are saved in the portal)."} No other game's identifiers are involved.
 - No gameplay, UI or scene file is edited.
 - Remote policy (frequency caps, banner, rewarded availability) is fetched at runtime from \`${remoteUrl}\`; it can switch ads off or run test ads, never production.
 
@@ -184,19 +210,29 @@ const result = (game: ApplyGame, r: Partial<ApplyResult> & Pick<ApplyResult, "st
   gameId: game.id, name: game.name, fullName: game.full_name, action: "none", moduleVersion: null, hooks: null, prNumber: null, prUrl: null, branch: null, ...r,
 });
 
+/**
+ * Applies the shared advertising module to ONE game. A game WITHOUT its own AdMob IDs still gets the module and a safe, disabled
+ * configuration with empty identifiers (so onboarding does not wait for AdMob), but it stays "Needs AdMob IDs" until it has its own.
+ */
 export async function applyToGame(deps: ApplyDeps, game: ApplyGame, own: AdsConfig | null): Promise<ApplyResult> {
-  const { git, bundle } = deps;
   if (!game.unity_detected) return result(game, { status: "needs_integration", detail: "No Unity project was detected in this repository." });
   if (game.is_archived) return result(game, { status: "failed", detail: "The repository is archived on GitHub (read-only)." });
-  const platforms = ownIdPlatforms(own);
-  if (!own || platforms.length === 0) return result(game, { status: "needs_ids", detail: "No AdMob app ID and ad units of its own are saved for this game. Add them on its AdMob IDs page." });
+  const r = await prepareIntegration(deps, game, own);
+  if (ownIdPlatforms(own).length > 0 || r.status === "failed") return r;
+  const prepared = r.prNumber ? `Safe disabled integration prepared in pull request #${r.prNumber} (no identifiers written). ` : r.moduleVersion ? `Module ${r.moduleVersion} is in ${deps.git.defaultBranch} with a disabled configuration. ` : "";
+  return { ...r, status: "needs_ids", detail: `${prepared}No AdMob app ID and ad units of its own are saved for this game yet. Add them on its AdMob IDs page.` };
+}
 
-  const clash = findIdConflicts(game.id, own, deps.others);
-  if (clash.length) return result(game, { status: "failed", detail: `${clash[0].id} already belongs to ${clash[0].otherName}. Each game needs its own AdMob identifiers.` });
+async function prepareIntegration(deps: ApplyDeps, game: ApplyGame, own: AdsConfig | null): Promise<ApplyResult> {
+  const { git, bundle } = deps;
+  if (own) {
+    const clash = findIdConflicts(game.id, own, deps.others);
+    if (clash.length) return result(game, { status: "failed", detail: `${clash[0].id} already belongs to ${clash[0].otherName}. Each game needs its own AdMob identifiers.` });
+  }
 
   try {
     const root = game.unity_project_path ? `${game.unity_project_path.replace(/\/$/, "")}/` : "";
-    const def = await inspectRef(git, git.defaultBranch, root);
+    const def = await inspectRef(git, git.defaultBranch, root, own);
     const hooks = await readHooks(git, root, git.defaultBranch);
     const base = { moduleVersion: def.version, hooks };
 
@@ -216,7 +252,7 @@ export async function applyToGame(deps: ApplyDeps, game: ApplyGame, own: AdsConf
     const pr = open.filter(isOurs).sort((a, b) => a.number - b.number)[0];
 
     if (pr) {
-      const st = await inspectRef(git, pr.head, root);
+      const st = await inspectRef(git, pr.head, root, own);
       const common = { ...base, prNumber: pr.number, prUrl: pr.url, branch: pr.head };
       if (upToDate(st, bundle)) return result(game, { ...common, status: "pr_open", detail: `Pull request #${pr.number} already contains module ${st.version} and is awaiting your approval.` });
       if (!deps.canWrite) return result(game, { ...common, status: "failed", action: "blocked", detail: `Pull request #${pr.number} is outdated (${st.version ?? "no module"} → ${bundle.version}), but the GitHub App has no write permission to update it.` });
@@ -238,7 +274,7 @@ export async function applyToGame(deps: ApplyDeps, game: ApplyGame, own: AdsConf
     const opened = await git.openPullRequest({
       head: INTEGRATION_BRANCH, base: git.defaultBranch,
       title: `Studio ads module ${bundle.version} (disabled, test mode)`,
-      body: prBody(game, bundle, summary, deps.remoteUrl, def.version === null),
+      body: prBody(game, bundle, summary, deps.remoteUrl, def.version === null, ownIdPlatforms(own).length > 0),
     });
     return result(game, { ...base, status: "pr_open", action: "created_pr", prNumber: opened.number, prUrl: opened.url, branch: INTEGRATION_BRANCH, detail: `Opened pull request #${opened.number}; awaiting your approval.` });
   } catch (e) {

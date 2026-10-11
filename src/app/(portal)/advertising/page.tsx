@@ -30,9 +30,11 @@ export default async function AdvertisingPage() {
   const rows: GameRowView[] = games.map((g) => {
     const hasIds = ownIdPlatforms(cfgOf.get(g.id)).length > 0;
     const r = resultOf.get(g.id);
-    const status: ApplyStatus | "not_applied" = !g.unity_detected ? "needs_integration" : !hasIds ? "needs_ids" : (r?.status ?? "not_applied");
+    const stale = hasIds && r?.status === "needs_ids";            // IDs were saved after the last Apply
+    const status: ApplyStatus | "not_applied" = !g.unity_detected ? "needs_integration" : !hasIds ? "needs_ids" : stale ? "not_applied" : (r?.status ?? "not_applied");
     const detail = !g.unity_detected ? "No Unity project was detected in this repository."
-      : !hasIds ? "No AdMob app ID and ad units of its own are saved for this game."
+      : !hasIds ? (r?.status === "needs_ids" ? (r.detail ?? "") : "No AdMob app ID and ad units of its own are saved for this game yet. Apply still prepares a safe, disabled integration.")
+      : stale ? "AdMob IDs are saved. Press Apply to put them into the pull request."
       : (r?.detail ?? "Not applied yet.");
     return { id: g.id, name: g.name, fullName: g.full_name, unity: g.unity_detected, status, detail, prUrl: r?.pr_url ?? null, prNumber: r?.pr_number ?? null, moduleVersion: r?.module_version ?? g.monetization?.studio_ads?.module_version ?? null, hooks: r?.hooks ?? null, checkedAt: r?.updated_at ?? null };
   });

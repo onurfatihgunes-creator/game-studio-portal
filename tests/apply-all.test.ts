@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { gzipSync } from "fflate";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { applyToGame, buildNewConfig, cmpVersion, INTEGRATION_BRANCH, mergeConfigAdditive, patchManifest, PR_MARKER, type ApplyDeps, type ApplyGame } from "@/lib/ads/apply";
+import { applyToGame, buildNewConfig, cmpVersion, fillEmptyIds, INTEGRATION_BRANCH, mergeConfigAdditive, patchManifest, PR_MARKER, type ApplyDeps, type ApplyGame } from "@/lib/ads/apply";
 import { buildBundle, loadModuleBundle, readTar, clearBundleCache } from "@/lib/ads/bundle";
 import { normalizeConfig, type AdsConfig } from "@/lib/ads/config";
 import { DEFAULT_POLICY, normalizePolicy, toRemoteJson } from "@/lib/ads/policy";
@@ -81,13 +81,40 @@ describe("shared policy contract", () => {
 });
 
 describe("Apply to one game", () => {
-  it("reports Needs AdMob IDs, writes nothing, and never invents identifiers", async () => {
-    const repo = new FakeRepo("o/one", unityFiles());
+  it("a game without its own IDs gets a safe DISABLED integration and stays Needs AdMob IDs; nothing is invented", async () => {
     for (const own of [null, normalizeConfig({}), cfgOf({ app_id: "ca-app-pub-3940256099942544~3347511713", rewarded: "ca-app-pub-3940256099942544/5224354917" }), cfgOf({ app_id: A.app_id })]) {
+      const repo = new FakeRepo("o/one", unityFiles());
       const r = await applyToGame(deps(repo), game(), own);
-      expect(r.status).toBe("needs_ids");
+      expect(r).toMatchObject({ status: "needs_ids", action: "created_pr", prNumber: 1 });
+      expect(r.detail).toMatch(/no AdMob app ID and ad units of its own/i);
+      const cfg = JSON.parse(repo.branches.get(INTEGRATION_BRANCH)!.get("Assets/Resources/StudioAdsConfig.json")!);
+      expect(cfg).toMatchObject({ enabled: false, testMode: true, android: { appId: "", rewarded: "", interstitial: "", banner: "" }, ios: { appId: "" }, remotePolicyUrl: REMOTE });
+      expect(JSON.stringify(cfg)).not.toMatch(/ca-app-pub/);                   // no identifier of any kind, demo ids included
+      expect(repo.prs[0].body).toMatch(/no AdMob identifiers yet/);
     }
-    expect(writes(repo)).toBe(0);
+  });
+
+  it("is repeatable without IDs, then fills ONLY empty identifiers in the same pull request once the game has its own", async () => {
+    const repo = new FakeRepo("o/one", unityFiles());
+    await applyToGame(deps(repo), game(), null);
+    const n = writes(repo);
+    expect(await applyToGame(deps(repo), game(), null)).toMatchObject({ status: "needs_ids", action: "none", prNumber: 1 });
+    expect(writes(repo)).toBe(n);                                                // no duplicate PR, no new commit
+
+    const r = await applyToGame(deps(repo), game(), cfgOf(A));                  // the game's own IDs were saved meanwhile
+    expect(r).toMatchObject({ status: "pr_open", action: "updated_pr", prNumber: 1 });
+    expect(repo.prs).toHaveLength(1);
+    const cfg = JSON.parse(repo.branches.get(INTEGRATION_BRANCH)!.get("Assets/Resources/StudioAdsConfig.json")!);
+    expect(cfg.android).toEqual({ appId: A.app_id, rewarded: A.rewarded, interstitial: A.interstitial, banner: A.banner });
+    expect(cfg).toMatchObject({ enabled: false, testMode: true });               // still disabled, still test mode
+    expect((await applyToGame(deps(repo), game(), cfgOf(A))).action).toBe("none");
+  });
+
+  it("never replaces a non-empty identifier already in a config", async () => {
+    expect(fillEmptyIds(JSON.stringify({ android: { appId: "mine", rewarded: "", interstitial: "keep" } }), cfgOf(A)).text).toContain('"appId": "mine"');
+    const out = JSON.parse(fillEmptyIds(JSON.stringify({ android: { appId: "mine", rewarded: "", interstitial: "keep" } }), cfgOf(A)).text);
+    expect(out.android).toMatchObject({ appId: "mine", rewarded: A.rewarded, interstitial: "keep" });
+    expect(fillEmptyIds(JSON.stringify({ android: { appId: "mine" } }), null).changed).toBe(false);
   });
 
   it("prepares a new integration: one branch, one PR, own IDs only, disabled + test mode, default branch untouched", async () => {
@@ -164,7 +191,7 @@ describe("Apply to one game", () => {
   it("Applied needs the module AND verified hooks AND the remote config; otherwise Needs game integration", async () => {
     const withModule = {
       "Packages/com.studio.ads/package.json": JSON.stringify({ name: "com.studio.ads", version: "0.4.0" }),
-      "Assets/Resources/StudioAdsConfig.json": JSON.stringify({ remotePolicyUrl: REMOTE }),
+      "Assets/Resources/StudioAdsConfig.json": JSON.stringify({ remotePolicyUrl: REMOTE, android: { appId: A.app_id, rewarded: A.rewarded, interstitial: A.interstitial, banner: A.banner } }),
     };
     const noHooks = new FakeRepo("o/one", unityFiles(withModule));
     expect((await applyToGame(deps(noHooks), game(), cfgOf(A))).status).toBe("needs_integration");
