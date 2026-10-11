@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "enabled": true,
+  "testMode": false,
+  "android": {
+    "appId": "ca-app-pub-1111222233334444~1234567890",
+    "rewarded": "ca-app-pub-1111222233334444/1111111111",
+    "interstitial": "ca-app-pub-1111222233334444/2222222222",
+    "banner": ""
+  },
+  "ios": {
+    "appId": "",
+    "rewarded": "",
+    "interstitial": "",
+    "banner": ""
+  },
+  "banner": {
+    "enabled": false,
+    "position": "bottom"
+  },
+  "caps": {
+    "interstitialMinIntervalSec": 120,
+    "interstitialMaxPerSession": 5,
+    "interstitialFirstDelaySec": 45,
+    "interstitialMinRunsBeforeFirst": 3,
+    "rewardedCooldownSec": 10
+  },
+  "consent": {
+    "tagForChildDirectedTreatment": false,
+    "tagForUnderAgeOfConsent": true,
+    "maxAdContentRating": "PG"
+  }
+}

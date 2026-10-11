@@ -6,7 +6,14 @@ import { AggregateBadge, MonetizationBadge, RunBadge } from "@/components/Status
 import { TriggerButton } from "@/components/TriggerButton";
 import { triggerDisabledReason } from "@/lib/workflow-trigger";
 import { Badge, PageHeader, timeAgo } from "@/components/ui";
-import { getGame, listWorkflows } from "@/lib/games";
+import { getGame, listBuildRuns, listWorkflows } from "@/lib/games";
+import { listReleases } from "@/lib/releases";
+import { MigrationNotice } from "@/components/MigrationNotice";
+import { phase2Ready } from "@/lib/phase2";
+import { getAdsConfig } from "@/lib/ads/store";
+import { adsStatus } from "@/lib/ads/config";
+import { BuildsPanel } from "@/components/BuildsPanel";
+import { ReleasePanel } from "@/components/ReleasePanel";
 import { masterGamePm } from "@/lib/integrations/master-pm";
 import { gameSummary } from "@/lib/status";
 import { requireUser } from "@/lib/supabase/server";
@@ -22,7 +29,8 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
   const { supabase } = await requireUser();
   const game = await getGame(supabase, id);
   if (!game) notFound();
-  const workflows = await listWorkflows(supabase, id);
+  const ready = await phase2Ready(supabase);
+  const [workflows, runs, releases, ads] = await Promise.all([listWorkflows(supabase, id), ready ? listBuildRuns(supabase, { gameId: id, limit: 50 }) : Promise.resolve([]), ready ? listReleases(supabase, { gameId: id }) : Promise.resolve([]), ready ? getAdsConfig(supabase, id) : Promise.resolve(null)]);
   const s = gameSummary(game, workflows);
   const pmLink = masterGamePm.linkFor(game);
 
@@ -49,9 +57,10 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
           <dl className="divide-y divide-line">
             <Row label="Tests"><AggregateBadge value={s.tests} /></Row>
             <Row label="Build"><AggregateBadge value={s.build} /></Row>
-            <Row label="Android readiness"><AggregateBadge value={s.android} title="Requires a build workflow that targets Android" /></Row>
-            <Row label="iOS readiness"><AggregateBadge value={s.ios} title="Requires a build workflow that targets iOS" /></Row>
+            <Row label="Android build"><AggregateBadge value={s.android} title="Latest run of a build workflow that targets Android. This is NOT release readiness: see “Release readiness” below." /></Row>
+            <Row label="iOS build"><AggregateBadge value={s.ios} title="Latest run of a build workflow that targets iOS. This is NOT release readiness: see “Release readiness” below." /></Row>
             <Row label="Monetization"><MonetizationBadge m={s.monetization} /></Row>
+            <Row label="Advertising"><Link href={`/games/${game.id}/ads`} className="hover:underline"><Badge tone={{ not_configured: "muted", disabled: "muted", test: "warn", invalid: "bad", production_ready: "good" }[adsStatus(ads)] as "muted"}>{{ not_configured: "Not configured", disabled: "Disabled", test: "Test mode", invalid: "Invalid config", production_ready: "Production IDs set" }[adsStatus(ads)]}</Badge></Link></Row>
             <Row label="Publishing"><AggregateBadge value={s.publishing} title={s.publishing === "not_configured" ? "No publishing workflow found" : "Latest run of the detected publishing workflow"} /></Row>
           </dl>
         </section>
@@ -70,6 +79,13 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
           </dl>
         </section>
       </div>
+
+      {ready ? (
+        <>
+          <BuildsPanel game={game} workflows={workflows} runs={runs} />
+          <ReleasePanel game={game} runs={runs} releases={releases} ads={ads} />
+        </>
+      ) : <div className="mt-4"><MigrationNotice what="Builds, release readiness and advertising" /></div>}
 
       <section className="card mt-4" aria-labelledby="wf-h">
         <h2 id="wf-h" className="border-b border-line px-4 py-3 text-sm font-semibold">Workflows <span className="font-normal text-muted">· latest run on {game.default_branch}</span></h2>
@@ -90,7 +106,9 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
                     <RunBadge w={w} />
                     {w.run_url && <a href={w.run_url} target="_blank" rel="noreferrer" className="mt-1 block hover:underline">#{w.run_number} · {timeAgo(w.run_updated_at)}</a>}
                   </div>
-                  <TriggerButton workflowRowId={w.id} workflowName={w.name} gameName={game.name} branch={game.default_branch} isPublish={w.kinds.includes("publish")} disabledReason={triggerDisabledReason(w, game.is_archived)} />
+                  {w.ci_ref ? <span className="text-xs text-muted">Use “Builds & tests” above</span> : (
+                    <TriggerButton workflowRowId={w.id} workflowName={w.name} gameName={game.name} branch={game.default_branch} isPublish={w.kinds.includes("publish")} disabledReason={triggerDisabledReason(w, game.is_archived)} />
+                  )}
                 </div>
               </li>
             ))}

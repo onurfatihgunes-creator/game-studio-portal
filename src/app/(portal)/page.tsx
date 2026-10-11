@@ -2,14 +2,17 @@ import Link from "next/link";
 import { AggregateBadge } from "@/components/StatusBadges";
 import { EmptyState, PageHeader, Stat, timeAgo } from "@/components/ui";
 import { readGitHubConfig } from "@/lib/github/app";
-import { groupWorkflows, listGames, listWorkflows } from "@/lib/games";
+import { groupWorkflows, listBuildRuns, listGames, listWorkflows } from "@/lib/games";
 import { gameSummary, runState } from "@/lib/status";
+import { MigrationNotice } from "@/components/MigrationNotice";
+import { phase2Ready } from "@/lib/phase2";
 import { requireUser } from "@/lib/supabase/server";
 import { DEV_STATUSES, DEV_STATUS_LABEL } from "@/lib/types";
 
 export default async function OverviewPage() {
   const { supabase } = await requireUser();
-  const [games, workflows] = await Promise.all([listGames(supabase), listWorkflows(supabase)]);
+  const ready = await phase2Ready(supabase);
+  const [games, workflows, runs] = await Promise.all([listGames(supabase), listWorkflows(supabase), ready ? listBuildRuns(supabase, { limit: 300 }) : Promise.resolve([])]);
   const byGame = groupWorkflows(workflows);
   const summaries = games.map((g) => ({ g, s: gameSummary(g, byGame.get(g.id) ?? []) }));
 
@@ -18,6 +21,16 @@ export default async function OverviewPage() {
   const gameName = (id: string) => games.find((g) => g.id === id)?.name ?? "";
   const count = (f: (x: (typeof summaries)[number]) => boolean) => summaries.filter(f).length;
   const github = readGitHubConfig();
+  const ciGames = new Set(workflows.filter((w) => w.ci_ref).map((w) => w.game_id));
+  const real = runs.filter((r) => r.action !== "smoke");
+  const inProgress = real.filter((r) => r.status !== "completed");
+  // newest completed real run per game+action; "failing" = that newest run failed
+  const newestBy = new Map<string, (typeof real)[number]>();
+  for (const r of real.filter((r) => r.status === "completed")) {
+    const k = `${r.game_id}|${r.action}`; const cur = newestBy.get(k);
+    if (!cur || Date.parse(r.started_at ?? "0") > Date.parse(cur.started_at ?? "0")) newestBy.set(k, r);
+  }
+  const failingBuilds = [...newestBy.values()].filter((r) => r.conclusion !== "success");
 
   if (games.length === 0) {
     return (
@@ -41,6 +54,13 @@ export default async function OverviewPage() {
         <Stat label="Running now" value={running.length} />
         <Stat label="Tests configured" value={count(({ s }) => s.tests !== "not_configured")} hint={`of ${games.length} games`} />
       </div>
+      {!ready && <div className="mt-3"><MigrationNotice what="CI statistics" /></div>}
+      {ready && <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="Shared CI onboarded" value={ciGames.size} hint={`of ${games.length} games`} />
+        <Stat label="CI runs in progress" value={inProgress.length} hint="From synced GitHub data" />
+        <Stat label="Failing CI actions" value={failingBuilds.length} hint="Latest run per game and action" />
+        <Stat label="CI runs recorded" value={real.length} hint="Excludes pipeline self-tests" />
+      </div>}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <section className="card" aria-labelledby="attn-h">

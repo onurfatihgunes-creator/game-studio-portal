@@ -8,6 +8,8 @@ A small web portal for tracking a portfolio of Unity mobile games. Connect a gam
 
 Connecting many games: **Games → Import many** finds Unity repositories automatically, hides the ones already connected, and imports your selection with progress, per-row errors and retry (see [Bulk import](#bulk-import)).
 
+Phase 02 adds a real operations layer on top: **tests and Android/iOS builds started from the portal** (shared `unity-ci` workflows), live run status/errors, **artifact downloads**, **release readiness + candidates + manual approval**, **per-game AdMob configuration**, a **shared Unity ads module**, and an **AdMob revenue dashboard**. See [Phase 02 operations](#phase-02-operations).
+
 Pages: **Overview · Games · Releases · Revenue**. Next.js 16 (App Router) · TypeScript · Tailwind 4 · Supabase (Postgres + Auth) · GitHub App · Vercel-compatible. No queues, workers, or extra services.
 
 ## What is real, and what is "Not configured"
@@ -96,6 +98,45 @@ Unity projects inside subfolders aren't found by the quick check; tick **Show al
 
 The browser calls small route handlers (`/api/games/discover|import|refresh`) rather than Server Actions because Next dispatches Server Actions one at a time per client. The handlers require a same-origin JSON request and a valid Supabase session.
 
+## Phase 02 operations
+
+### Shared CI (the `unity-ci` repository)
+Each game gets one ~30-line caller workflow (`workflow_dispatch` only) that calls the reusable workflow in the private `unity-ci` repo. The portal detects it (`uses: <owner>/unity-ci/…`), reads the allowed `action` choices, and shows **Builds & tests** on the game page: *Run EditMode / PlayMode tests*, *Build Android (dev)*, *Validate iOS*, *Self-test*. Every button opens a confirmation dialog; `android-release` additionally needs the game name typed. Nothing runs on push, nothing publishes, and no signing material is created.
+
+- Runs on a **self-hosted Mac** (`["self-hosted","macOS","unity"]`) that has the needed Unity versions installed and activated. **Whether automated builds are allowed on your Unity licence tier is yours to confirm with Unity; the portal and workflows do not bypass or automate licensing.** Only the *Self-test* action runs on a GitHub-hosted runner (no Unity, ~1 minute of included minutes).
+- Results come from GitHub (run, jobs, artifacts) plus a validated `portal-result.json` written by the workflow (test counts and failing test names, compile/build error summary, version, build number, duration, artifact SHA-256). Missing fields stay empty; nothing is invented. Runs of other workflows show status only.
+- **Artifacts**: dev APKs kept 7 days. Download goes through `/api/artifacts/<game>/<id>` — authenticated, only artifacts recorded for that game, GitHub credentials never reach the browser.
+- **Onboarding many games**: `tools/onboard.sh` (in `unity-ci`) opens one reviewable PR per repository using *your* `gh` login (dry run by default). The portal's Games list shows who is onboarded. The portal GitHub App stays read-mostly (no write access to game repositories).
+- **Disk hygiene**: before Unity runs on a self-hosted runner, if free space is low the oldest *other* projects' `Library/` caches are removed (never sources). One build per repository at a time; one runner process runs one job at a time.
+- **Retries/timeouts**: per-Unity-invocation timeout; one automatic retry only for known transient failures (Gradle daemon stopped).
+
+### Release management (no publishing)
+`Release readiness` on each game page evaluates Android and iOS from real data: tests on the latest commit, build + artifact present, release-signed AAB (a debug-signed APK always fails), placeholder bundle id/company, version/build number above the last approved release, target API, iOS validation, Apple team id, advertising safety. Each check is pass / fail / warning / unknown with its evidence. A **release candidate** is recorded from a successful build; a person can **approve** it (typed game name, refused while any check fails), **reject**, or record **published manually** after uploading to the store by hand. The portal never calls a store API.
+
+### Advertising
+Per game: **Advertising** page (AdMob app/ad-unit IDs per platform, test mode, frequency caps, banner, consent flags). Validation is enforced server-side (ID formats, one publisher per platform, no Google demo IDs in production). **Download StudioAdsConfig.json** → `Assets/Resources/StudioAdsConfig.json`. A batch action on the Revenue page creates safe test configs (disabled, test mode, Google demo IDs) for games without one. The Unity module `com.studio.ads` (in `unity-ci`) executes it: rewarded/interstitial/banner, caps, backoff retries, timeouts, UMP consent before any request, test mode by default. **AdMob apps and ad units are created in AdMob** — the AdMob API's create methods exist only in v1beta and make irreversible changes to your production account, so the portal does not use them.
+
+### AdMob revenue (read-only)
+Set `GOOGLE_OAUTH_CLIENT_ID/SECRET` and `ADMOB_TOKEN_ENCRYPTION_KEY` (see `.env.example`), register the redirect URI, then **Revenue → Connect AdMob** (scopes `admob.readonly` + `admob.report`, PKCE). Only the refresh token is stored, AES-256-GCM encrypted with a key that exists only in server env. **Sync now** pulls the last 30 days of network reports; revenue is attributed to a game only when its production AdMob app ID is set. Until connected the page says “Not connected”; eCPM is computed only when there are impressions.
+
+### Checking it against real services
+```bash
+npm run test:connection                    # Supabase auth + RLS + every table (anonymous access must be denied); GitHub App
+npm run test:ci-roundtrip -- owner/repo   # dispatches the SELF-TEST action via the GitHub App, waits, syncs, resolves an artifact download
+```
+With the dev server running and **you signed in in your own browser**, open these (read-only unless noted); results are shown and also written to the server log with a `[selftest]` prefix:
+- `/api/health?deep=1` — schema state (is migration 0002 applied?), configuration, and every page rendering with your session.
+- `/api/health?exercise=owner/repo` — **dev only**: connects the repo (or reuses it), dispatches the self-test through the portal's own action, waits, checks the parsed result and artifact download, proves the Unity gate refuses Unity actions, exercises ad-config validation/persistence/export, then removes the test game it created. Uses ~10–15 s of included hosted minutes. Disabled when `NODE_ENV=production`.
+
+### Unity automation gate
+`UNITY_AUTOMATION_ALLOWED` (default `false`). While it is not exactly `true`, the portal refuses every Unity action (tests, Android, iOS) on the server and disables the buttons; the Unity-free **Self-test** still works. Flip it only after confirming with Unity that automated builds are permitted under your licence.
+
+### AdMob OAuth: the Google Cloud steps that cannot be automated
+1. Google Cloud Console → create or pick a project → *APIs & Services ▸ Library* → enable **AdMob API**.
+2. *Google Auth platform* (OAuth consent screen): user type **External**, fill the app name/email, add the AdMob owner as a test user, then set **Publishing status = In production**. In *Testing* status Google expires the refresh token after **7 days** (Google OAuth docs), and you would have to reconnect weekly. (An unverified-app warning screen appears for one-person use; accept it.)
+3. *Credentials ▸ Create credentials ▸ OAuth client ID ▸ Web application*; add the authorized redirect URI `http://localhost:3000/api/integrations/admob/callback` (plus `https://YOUR-DOMAIN/api/integrations/admob/callback` once deployed). Download the JSON.
+4. Put the client ID/secret into `.env.local` as `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (`ADMOB_TOKEN_ENCRYPTION_KEY` is already generated), restart the dev server, then **Revenue ▸ Connect AdMob** with the Google account that owns the AdMob account.
+
 ## Master Game PM boundary
 
 `src/lib/integrations/master-pm.ts` is the only place the portal may talk about Master Game PM. Today it only builds a deep link from `MASTER_PM_BASE_URL` + a per-game `pm_ref` (editable on the game page). It never reads, writes or deletes anything in the PM project.
@@ -118,9 +159,10 @@ tests/
 
 ## Known limitations
 
-- **Not yet exercised against your live accounts.** In development I verified types, the production build, unit/integration tests, and the UI (including the connect wizard through the scan step) against *fake* GitHub and Supabase servers. The final database write ("Add game"), real GitHub responses, and real RLS are untested until you run `npm run test:connection` and connect a game with your credentials.
-- **Classification is heuristic.** It reads workflow YAML for known signals. Pipelines that hide Unity/Fastlane calls inside reusable workflows (`uses: ./.github/workflows/x.yml`), composite actions, or external scripts will show "Not configured" for what they do. Hover a workflow's detail line to see the signals that matched.
-- **"Ready" means evidence, not guarantees.** Android/iOS readiness only reflects a build workflow that names the platform and its latest result. Signing keys, store listings, and bundle settings aren't checked.
+- **Phase 02 verification status.** Verified for real: GitHub-App dispatch → hosted run → validated result → artifact → signed download URL (self-test action, pilot repo); Unity 6000.6.3f1 EditMode tests, Android APK and AAB export, and iOS export through `unity_ci.py` on the isolated pilot; the ads module's 32 Unity tests and compilation of the Google adapter against `com.google.ads.mobile` 11.5.0. **Not verified**: a Unity job on a GitHub runner (no runner is installed and the Unity licence question is open), real ad display (needs a device), the live AdMob OAuth/report calls (need your Google credentials; tested against recorded response shapes), and the portal UI with your real Supabase session.
+- **MVP 01 status.** Verified against the real services: Supabase auth + RLS (`npm run test:connection`), GitHub App authentication and scanning, adding a real game and reloading it. Bulk import was verified live for discovery and against fakes for the import/retry UI.
+- **Classification is heuristic.** It reads workflow YAML for known signals. Workflows that call the studio's shared `unity-ci` are recognised; other pipelines that hide Unity/Fastlane calls inside other reusable workflows, composite actions, or external scripts will show "Not configured" for what they do. Hover a workflow's detail line to see the signals that matched.
+- **"Ready" means evidence, not guarantees.** Release readiness reflects recorded CI runs and ProjectSettings facts; store listings, signing key custody, Play/App Store policies and the actual upload are outside it (publishing is manual).
 - **Monetization is SDK presence** in the manifest (and only for the first Unity project found); it doesn't prove ads are live. **Publishing status** doesn't read store state.
 - **Type and development status are manual.**
 - **Snapshots, no webhooks.** Data is as fresh as the last Refresh (per game, or "Refresh all", which runs 4 games at a time from the browser via `/api/games/refresh` to stay inside serverless time limits; ~8 GitHub calls per game). Status after a manual run is a best-effort refresh 2.5 s later.
@@ -129,3 +171,9 @@ tests/
 - **Nested Unity projects:** the shallowest `ProjectSettings` is used; in huge monorepos the recursive tree may be truncated and only the repo root is checked (noted on the game).
 - **Single-tenant, one role.** All signed-in users can do everything; auth is email + password only (no SSO/MFA setup in the app, though Supabase MFA can be enabled separately). The games list isn't paginated (fine for ~150).
 - GitHub App tokens are cached per server instance; GitHub rate limits (5 000+/h per installation) apply — a full 150-game refresh is ~1 200 requests.
+- **Build capacity**: one Mac, one runner = one job at a time; other Unity/Gradle users on that Mac can disturb builds (observed once in M0). A dedicated macOS user/machine is recommended; the Unity Personal licence is per macOS user.
+- **Unity licensing for automation is unresolved** (your decision with Unity). Until confirmed, do not run the Unity actions from the portal; the self-test action is always safe.
+- **Android release (AAB) and iOS IPA signing are not set up**: `android-release` fails fast without the keystore variables on the runner; iOS validation is unsigned. No signing material is created by the portal or workflows.
+- **Ads**: real ad display is untested (needs a device); the adapter targets Google Mobile Ads Unity plugin 11.x (callbacks are marshalled to the main thread because 11.x raises them off-thread). iOS also needs the ATT prompt and usage string, which are yours to add.
+- **AdMob revenue** shows data only after you authorize Google and map each game's production app ID; the report API's timezone is fixed to America/Los_Angeles; IAP revenue is not connected.
+- **Artifacts**: GitHub's 500 MB (Free) artifact quota holds only a handful of APKs at 7-day retention; the portal does not copy artifacts elsewhere.

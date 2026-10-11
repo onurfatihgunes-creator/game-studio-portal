@@ -1,7 +1,8 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ScanResult } from "./github/types";
-import type { DevStatus, GameRow, GameType, WorkflowRow } from "./types";
+import { schemaHint } from "./phase2";
+import type { BuildRunRow, DevStatus, GameRow, GameType, WorkflowRow } from "./types";
 
 type Db = SupabaseClient;
 
@@ -32,6 +33,7 @@ function gameFields(scan: ScanResult) {
     unity_note: scan.unity.note,
     docs: scan.docs,
     monetization: scan.monetization,
+    project_facts: scan.projectFacts,
     commit_sha: c?.sha ?? null,
     commit_message: c?.message ?? null,
     commit_author: c?.author ?? null,
@@ -53,6 +55,8 @@ function workflowRows(gameId: string, scan: ScanResult) {
     platforms: w.platforms,
     signals: w.signals,
     triggers: w.triggers,
+    ci_ref: w.ciRef,
+    ci_actions: w.ciActions,
     dispatchable: w.dispatchable,
     has_required_inputs: w.hasRequiredInputs,
     run_id: w.latestRun?.id ?? null,
@@ -71,7 +75,7 @@ async function replaceWorkflows(db: Db, gameId: string, scan: ScanResult) {
   const rows = workflowRows(gameId, scan);
   if (rows.length) {
     const { error } = await db.from("game_workflows").upsert(rows, { onConflict: "game_id,path" });
-    if (error) throw new Error(`Saving workflows failed: ${error.message}`);
+    if (error) throw new Error(schemaHint(`Saving workflows failed: ${error.message}`));
   }
   // Remove workflows that no longer exist in the repo.
   const keep = rows.map((r) => r.path);
@@ -100,7 +104,7 @@ export async function insertGame(
     .single();
   if (error) {
     if (error.code === "23505") throw new DuplicateGameError(scan.repo.fullName);
-    throw new Error(`Saving game failed: ${error.message}`);
+    throw new Error(schemaHint(`Saving game failed: ${error.message}`));
   }
   await replaceWorkflows(db, data.id, scan);
   return data.id;
@@ -108,7 +112,7 @@ export async function insertGame(
 
 export async function applyScan(db: Db, gameId: string, scan: ScanResult) {
   const { error } = await db.from("games").update(gameFields(scan)).eq("id", gameId);
-  if (error) throw new Error(`Saving game failed: ${error.message}`);
+  if (error) throw new Error(schemaHint(`Saving game failed: ${error.message}`));
   await replaceWorkflows(db, gameId, scan);
 }
 
@@ -140,4 +144,12 @@ export function groupWorkflows(ws: WorkflowRow[]): Map<string, WorkflowRow[]> {
   const m = new Map<string, WorkflowRow[]>();
   for (const w of ws) m.set(w.game_id, [...(m.get(w.game_id) ?? []), w]);
   return m;
+}
+
+export async function listBuildRuns(db: Db, opts: { gameId?: string; limit?: number } = {}): Promise<BuildRunRow[]> {
+  let q = db.from("build_runs").select("*").order("started_at", { ascending: false, nullsFirst: false }).limit(opts.limit ?? 200);
+  if (opts.gameId) q = q.eq("game_id", opts.gameId);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return (data ?? []) as BuildRunRow[];
 }

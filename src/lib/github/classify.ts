@@ -1,4 +1,5 @@
 import { parse } from "yaml";
+import { CI_ACTION_META, knownActions } from "../ci/actions";
 import type { Monetization, Platform, WorkflowKind } from "./types";
 
 /**
@@ -15,7 +16,14 @@ export type Classification = {
   hasWorkflowDispatch: boolean;
   hasRequiredInputs: boolean;
   name: string | null;
+  /** Shared-CI reusable workflow referenced by a job (owner/unity-ci/.github/workflows/x.yml@ref), if any. */
+  ciRef: string | null;
+  /** Known values of the workflow_dispatch input `action` (only meaningful with ciRef). */
+  ciActions: string[];
 };
+
+/** Job-level `uses:` pointing at the studio's shared Unity CI repository. */
+const SHARED_CI_USES = /^[\w.-]+\/unity-ci\/\.github\/workflows\/[\w.-]+\.ya?ml@\S+$/;
 
 const TEST_SIGNALS: [RegExp, string][] = [
   [/game-ci\/unity-test-runner/i, "uses game-ci/unity-test-runner"],
@@ -84,6 +92,8 @@ export function classifyWorkflow(yamlText: string): Classification {
     hasWorkflowDispatch: false,
     hasRequiredInputs: false,
     name: null,
+    ciRef: null,
+    ciActions: [],
   };
 
   let doc: unknown = null;
@@ -114,6 +124,22 @@ export function classifyWorkflow(yamlText: string): Classification {
     }
   }
 
+  if (doc && typeof doc === "object") {
+    const d = doc as Record<string, unknown>;
+    const jobs = d.jobs && typeof d.jobs === "object" ? (d.jobs as Record<string, unknown>) : {};
+    for (const job of Object.values(jobs)) {
+      const uses = job && typeof job === "object" ? (job as Record<string, unknown>).uses : null;
+      if (typeof uses === "string" && SHARED_CI_USES.test(uses)) {
+        result.ciRef = uses;
+        break;
+      }
+    }
+    const on = d.on as Record<string, unknown> | undefined;
+    const wd = on && typeof on === "object" && !Array.isArray(on) ? (on.workflow_dispatch as Record<string, unknown> | null) : null;
+    const options = wd && typeof wd === "object" ? ((wd.inputs as Record<string, unknown> | undefined)?.action as Record<string, unknown> | undefined)?.options : null;
+    if (result.ciRef && Array.isArray(options)) result.ciActions = knownActions(options.filter((o): o is string => typeof o === "string"));
+  }
+
   const kinds = new Set<WorkflowKind>();
   const add = (kind: WorkflowKind, table: [RegExp, string][]) => {
     for (const [re, label] of table) {
@@ -126,6 +152,15 @@ export function classifyWorkflow(yamlText: string): Classification {
   add("test", TEST_SIGNALS);
   add("build", BUILD_SIGNALS);
   add("publish", PUBLISH_SIGNALS);
+  // Shared CI: the real work happens inside the reusable workflow, so derive from the declared actions.
+  const actionPlatforms = new Set<Platform>();
+  if (result.ciRef && result.ciActions.length) {
+    const cats = new Set(result.ciActions.map((a) => CI_ACTION_META[a as keyof typeof CI_ACTION_META].category));
+    if (cats.has("test")) { kinds.add("test"); result.signals.push("test: shared unity-ci action(s)"); }
+    if (cats.has("android") || cats.has("ios")) { kinds.add("build"); result.signals.push("build: shared unity-ci action(s)"); }
+    if (cats.has("android")) actionPlatforms.add("android");
+    if (cats.has("ios")) actionPlatforms.add("ios");
+  }
   result.kinds = (["test", "build", "publish"] as const).filter((k) => kinds.has(k));
 
   const platforms = new Set<Platform>();
@@ -135,6 +170,7 @@ export function classifyWorkflow(yamlText: string): Classification {
     if (p) platforms.add(p);
   }
   // Platforms only mean something for build/publish workflows.
+  for (const p of actionPlatforms) platforms.add(p);
   result.platforms = kinds.has("build") || kinds.has("publish") ? (["android", "ios"] as const).filter((p) => platforms.has(p)) : [];
   return result;
 }

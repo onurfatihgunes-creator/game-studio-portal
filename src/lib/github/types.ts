@@ -1,3 +1,4 @@
+import type { ProjectFacts } from "./project-facts";
 export type WorkflowKind = "test" | "build" | "publish";
 export type Platform = "android" | "ios";
 
@@ -24,6 +25,8 @@ export type RunSummary = {
 };
 
 export type ScannedWorkflow = {
+  ciRef: string | null;
+  ciActions: string[];
   githubWorkflowId: number | null;
   name: string;
   path: string;
@@ -57,4 +60,5 @@ export type ScanResult = {
   docs: DocEntry[];
   monetization: Monetization;
   workflows: ScannedWorkflow[];
+  projectFacts: ProjectFacts;
 };

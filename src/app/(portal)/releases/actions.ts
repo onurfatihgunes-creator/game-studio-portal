@@ -8,6 +8,9 @@ import { latestRun } from "@/lib/github/scan";
 import { getGame } from "@/lib/games";
 import { requireUser } from "@/lib/supabase/server";
 import type { WorkflowRow } from "@/lib/types";
+import { CI_ACTION_META, isCiAction } from "@/lib/ci/actions";
+import { unityBlockedReason } from "@/lib/ci/policy";
+import { syncBuilds } from "@/lib/game-sync";
 import type { ActionResult } from "../games/actions";
 
 /**
@@ -21,12 +24,15 @@ export async function triggerWorkflowAction(input: {
   workflowRowId: string;
   confirmed: boolean;
   typedGameName?: string;
+  /** Shared-CI workflows only: one of the workflow's declared `action` choices. */
+  action?: string;
 }): Promise<ActionResult> {
-  let audit: { game_id: string; game_name: string; workflow_path: string; workflow_kinds: string[]; ref: string } | null = null;
+  let audit: { game_id: string; game_name: string; workflow_path: string; workflow_kinds: string[]; ref: string; detail?: string } | null = null;
   const { supabase, user } = await requireUser();
   const log = async (outcome: "accepted" | "rejected", detail?: string) => {
     if (!audit) return;
-    await supabase.from("workflow_dispatches").insert({ ...audit, user_email: user.email ?? null, outcome, detail: detail?.slice(0, 500) ?? null });
+    const { detail: _d, ...base } = audit;
+    await supabase.from("workflow_dispatches").insert({ ...base, user_email: user.email ?? null, outcome, detail: detail?.slice(0, 500) ?? null });
   };
 
   try {
@@ -40,15 +46,29 @@ export async function triggerWorkflowAction(input: {
     audit = { game_id: game.id, game_name: game.name, workflow_path: w.path, workflow_kinds: w.kinds, ref: game.default_branch };
 
     if (!w.dispatchable || w.github_workflow_id === null) throw new Error("This workflow cannot be triggered manually (no workflow_dispatch trigger, or it is disabled).");
-    if (w.has_required_inputs) throw new Error("This workflow requires inputs, which the portal does not support yet. Run it from GitHub.");
     if (game.is_archived) throw new Error("The repository is archived.");
-    if (w.kinds.includes("publish") && input.typedGameName?.trim() !== game.name) {
-      throw new Error("This workflow appears to publish to a store. Type the game name to confirm.");
+
+    let inputs: Record<string, string> | undefined;
+    if (w.ci_ref) {
+      // Shared studio CI: the only input the portal sends is `action`, validated against what the workflow declares.
+      if (!isCiAction(input.action) || !w.ci_actions.includes(input.action)) throw new Error("Choose one of the actions this workflow supports.");
+      if (CI_ACTION_META[input.action].typedConfirm && input.typedGameName?.trim() !== game.name) {
+        throw new Error("This action prepares a release build. Type the game name to confirm.");
+      }
+      const blocked = unityBlockedReason(input.action);
+      if (blocked) throw new Error(blocked);
+      inputs = { action: input.action };
+      audit.detail = `action=${input.action}`;
+    } else {
+      if (w.has_required_inputs) throw new Error("This workflow requires inputs, which the portal does not support for non-shared workflows. Run it from GitHub.");
+      if (w.kinds.includes("publish") && input.typedGameName?.trim() !== game.name) {
+        throw new Error("This workflow appears to publish to a store. Type the game name to confirm.");
+      }
     }
 
     const cfg = requireGitHubConfig();
-    await dispatchWorkflow(cfg, game.github_installation_id, game.owner, game.repo, w.github_workflow_id, game.default_branch);
-    await log("accepted");
+    await dispatchWorkflow(cfg, game.github_installation_id, game.owner, game.repo, w.github_workflow_id, game.default_branch, inputs);
+    await log("accepted", audit.detail);
 
     // GitHub returns 204 without a run id; give it a moment, then pull the newest run.
     await new Promise((r) => setTimeout(r, 2500));
@@ -64,6 +84,7 @@ export async function triggerWorkflowAction(input: {
     } catch {
       /* the dispatch itself succeeded; status refresh is best-effort */
     }
+    if (w.ci_ref) await syncBuilds(supabase, game.id); // shows the new run (queued) immediately
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (e) {

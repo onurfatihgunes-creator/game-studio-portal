@@ -5,6 +5,7 @@ import {
   ghJson,
   ghText,
 } from "./app";
+import { parseProjectSettings } from "./project-facts";
 import { classifyWorkflow, detectMonetization, docKind, parseUnityVersion } from "./classify";
 import type { DocEntry, RunSummary, ScanResult, ScannedWorkflow } from "./types";
 
@@ -97,6 +98,11 @@ export async function scanRepository(
     ? detectMonetization(await ghText(token, `${base}/contents/${enc(manifestPath)}`))
     : { checked: false };
 
+  // ── Project facts (versions, bundle ids, signing flags) ───────────
+  const projectFacts = unity.detected
+    ? parseProjectSettings(await ghText(token, `${base}/contents/${enc(`${unity.projectPath ? unity.projectPath + "/" : ""}ProjectSettings/ProjectSettings.asset`)}`))
+    : parseProjectSettings(null);
+
   // ── Workflows ─────────────────────────────────────────────────────
   const byPath = new Map((registered?.workflows ?? []).map((w) => [w.path, w]));
   const files = (Array.isArray(workflowDir) ? workflowDir : []).filter(
@@ -120,6 +126,8 @@ export async function scanRepository(
         platforms: c.platforms,
         signals: c.signals,
         triggers: c.triggers,
+        ciRef: c.ciRef,
+        ciActions: c.ciActions,
         dispatchable: c.hasWorkflowDispatch && reg?.state === "active",
         hasRequiredInputs: c.hasRequiredInputs,
         latestRun: run,
@@ -148,6 +156,7 @@ export async function scanRepository(
     docs,
     monetization,
     workflows,
+    projectFacts,
   };
 }
 

@@ -17,7 +17,7 @@ const ok = (m: string) => console.log(`  ✔ ${m}`);
 const bad = (m: string) => { failed = true; console.log(`  ✘ ${m}`); };
 const step = (m: string) => console.log(`\n${m}`);
 
-const TABLES = ["games", "game_workflows", "workflow_dispatches"] as const;
+const TABLES = ["games", "game_workflows", "workflow_dispatches", "build_runs", "game_releases", "game_ads_config", "admob_connection", "revenue_daily"] as const;
 const RLS_DENIED = "42501";
 
 async function supabaseChecks(url: string, key: string) {
@@ -37,7 +37,7 @@ async function supabaseChecks(url: string, key: string) {
   for (const t of TABLES) {
     const read = await anon.from(t).select("*").limit(1);
     if (read.error?.code === RLS_DENIED) ok(`anon read denied on ${t}`);
-    else if (read.error?.code === "42P01" || read.error?.code === "PGRST205") bad(`table ${t} missing — run the migration`);
+    else if (read.error?.code === "42P01" || read.error?.code === "PGRST205") bad(`table ${t} is missing — apply supabase/migrations/${["build_runs", "game_releases", "game_ads_config", "admob_connection", "revenue_daily"].includes(t) ? "0002_phase2_ci_releases_ads.sql" : "0001_init.sql"} in the Supabase SQL Editor`);
     else if (read.error) bad(`anon read on ${t}: unexpected error ${read.error.code} ${read.error.message}`);
     else bad(`SECURITY: anonymous read on ${t} succeeded (${read.data.length} rows visible)`);
 

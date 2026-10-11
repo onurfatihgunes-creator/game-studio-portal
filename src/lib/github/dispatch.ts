@@ -9,11 +9,12 @@ export async function dispatchWorkflow(
   repo: string,
   workflowId: number,
   ref: string,
+  inputs?: Record<string, string>,
 ): Promise<void> {
   const token = await getInstallationToken(config, installationId);
   await ghPostNoContent(
     token,
     `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${workflowId}/dispatches`,
-    { ref },
+    inputs ? { ref, inputs } : { ref },
   );
 }

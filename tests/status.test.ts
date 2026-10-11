@@ -4,7 +4,7 @@ import type { GameRow, WorkflowRow } from "@/lib/types";
 
 const wf = (over: Partial<WorkflowRow>): WorkflowRow => ({
   id: "1", game_id: "g", github_workflow_id: 1, name: "w", path: ".github/workflows/w.yml", state: "active",
-  kinds: [], platforms: [], signals: [], triggers: [], dispatchable: false, has_required_inputs: false,
+  kinds: [], platforms: [], signals: [], triggers: [], ci_ref: null, ci_actions: [], dispatchable: false, has_required_inputs: false,
   run_id: null, run_number: null, run_status: null, run_conclusion: null, run_event: null, run_branch: null,
   run_url: null, run_started_at: null, run_updated_at: null, updated_at: "", ...over,
 });

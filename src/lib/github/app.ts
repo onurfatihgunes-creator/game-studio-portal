@@ -110,6 +110,15 @@ export async function ghText(token: string, path: string): Promise<string | null
   return await res.text();
 }
 
+/** GET that expects a 302 and returns its Location (used for artifact downloads; the signed URL is short-lived). */
+export async function ghRedirectLocation(token: string, path: string): Promise<string | null> {
+  const res = await githubFetch(token, path, { redirect: "manual" });
+  if (res.status === 404 || res.status === 410) return null; // missing or expired artifact
+  const loc = res.headers.get("location");
+  if (res.status >= 300 && res.status < 400 && loc) return loc;
+  throw await explain(res, path);
+}
+
 export async function ghPostNoContent(token: string, path: string, body: unknown): Promise<void> {
   const res = await githubFetch(token, path, {
     method: "POST",

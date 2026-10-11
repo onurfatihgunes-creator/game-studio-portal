@@ -71,7 +71,7 @@ describe("duplicate prevention", () => {
   const scan = {
     scannedAt: new Date().toISOString(),
     repo: { id: 9, installationId: 1, owner: "o", name: "r", fullName: "o/r", htmlUrl: "u", description: null, defaultBranch: "main", isPrivate: true, isArchived: false, pushedAt: null },
-    latestCommit: null, unity: { detected: true, version: "6000.0.0f1", projectPath: "", note: null }, docs: [], monetization: { checked: false }, workflows: [],
+    latestCommit: null, unity: { detected: true, version: "6000.0.0f1", projectPath: "", note: null }, docs: [], monetization: { checked: false }, workflows: [], projectFacts: { checked: false },
   } satisfies ScanResult;
 
   it("maps the unique-violation on github_repo_id to DuplicateGameError", async () => {
@@ -109,11 +109,11 @@ describe("/api/games routes are protected", () => {
 describe("bulk import guard (requireUnity)", () => {
   const scanOf = (detected: boolean) => ({
     scannedAt: new Date().toISOString(),
-    repo: { id: 77, installationId: 1, owner: "o", name: "unity-merge-engine", fullName: "o/unity-merge-engine", htmlUrl: "u", description: null, defaultBranch: "main", isPrivate: true, isArchived: false, pushedAt: null },
+    repo: { id: 77, installationId: 1, owner: "o", name: "shared-engine", fullName: "o/shared-engine", htmlUrl: "u", description: null, defaultBranch: "main", isPrivate: true, isArchived: false, pushedAt: null },
     latestCommit: null, unity: { detected, version: detected ? "6000.0.0f1" : null, projectPath: detected ? "" : null, note: null },
-    docs: [], monetization: { checked: false }, workflows: [],
+    docs: [], monetization: { checked: false }, workflows: [], projectFacts: { checked: false },
   }) satisfies ScanResult;
-  const input = { installationId: 1, owner: "o", repo: "unity-merge-engine", name: "Engine", type: "mini", devStatus: "prototype", requireUnity: true } as const;
+  const input = { installationId: 1, owner: "o", repo: "shared-engine", name: "Engine", type: "mini", devStatus: "prototype", requireUnity: true } as const;
   const untouchedDb: any = { from: () => { throw new Error("database must not be touched"); } };
 
   it("refuses a repository with no Unity project and writes nothing", async () => {
