@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { encryptSecret } from "@/lib/crypto";
-import { ADMOB_SCOPES, AdMobError, exchangeCode, listPublisherIds, readAdMobEnv, refreshAccessToken } from "@/lib/revenue/admob";
+import { ADMOB_SCOPES, AdMobError, describeAccessToken, exchangeCode, listPublisherIds, readAdMobEnv, refreshAccessToken } from "@/lib/revenue/admob";
 import { createClient } from "@/lib/supabase/server";
 
 /** Failure stage → short code shown on the Revenue page. The log line carries Google's own (secret-free) message. */
@@ -43,12 +43,16 @@ export async function GET(request: NextRequest) {
 
   // Stage 2: can this Google user reach an AdMob account through the API?
   let publishers: string[];
+  let access = "";
   try {
-    publishers = await listPublisherIds(await refreshAccessToken(cfg.env, tokens.refresh_token));
+    access = await refreshAccessToken(cfg.env, tokens.refresh_token);
+    publishers = await listPublisherIds(access);
   } catch (e) {
     const kind = e instanceof AdMobError ? e.kind : "failed";
-    const code = kind === "api_disabled" ? "api_disabled" : kind === "forbidden" ? "forbidden" : "api_failed";
-    return fail(request, code, "AdMob accounts.list", e instanceof Error ? e.message : undefined);
+    const code = kind === "api_disabled" ? "api_disabled" : kind === "forbidden" ? "forbidden" : kind === "reauthorize" ? "api_unauthorized" : "api_failed";
+    // For auth failures, say what Google thinks of the token (secret-free) so the cause can be named.
+    const info = access && (kind === "reauthorize" || kind === "forbidden") ? ` | ${await describeAccessToken(access, cfg.env.clientId)}` : "";
+    return fail(request, code, "AdMob accounts.list", `${e instanceof Error ? e.message : ""}${info}`);
   }
   if (publishers.length === 0) return fail(request, "account", "AdMob accounts.list", "the Google user has no AdMob account");
 

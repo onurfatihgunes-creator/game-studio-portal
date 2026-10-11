@@ -233,6 +233,26 @@ describe("OAuth callback reports the REAL failing stage (and never logs secrets)
     expect(res.headers.get("location")).toContain("admob=storage");
     warn.mockRestore(); h.upsertError = null;
   });
+  it("401 on accounts.list → api_unauthorized, and the log carries tokeninfo facts but never the token", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    h.user = { email: "dev@studio.test" };
+    const ACCESS = "ya29.SECRETACCESSTOKENVALUE";
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/tokeninfo")) return json({ scope: ADMOB_SCOPES.join(" "), expires_in: "3599", aud: "cid" });
+      if (url.includes("/token")) return json(String(init!.body).includes("authorization_code") ? { access_token: "x", refresh_token: SECRET_REFRESH, scope: ADMOB_SCOPES.join(" ") } : { access_token: ACCESS });
+      if (url.endsWith("/accounts")) return new Response(JSON.stringify({ error: { message: "Request is missing required authentication credential.", details: [{ reason: "CREDENTIALS_MISSING" }] } }), { status: 401, headers: { "content-type": "application/json", "www-authenticate": 'Bearer realm="https://accounts.google.com/"' } });
+      return json({}, 404);
+    }));
+    process.env.GOOGLE_OAUTH_CLIENT_ID = "cid";
+    const { GET } = await import("@/app/api/integrations/admob/callback/route");
+    const res = await GET(new NextRequest(`http://localhost:3000/api/integrations/admob/callback?code=${SECRET_CODE}&state=s1`, { headers: { cookie: "admob_oauth=s1.verifier123" } }));
+    const logs = warn.mock.calls.map((c) => c.join(" ")).join("\n"); warn.mockRestore();
+    expect(res.headers.get("location")).toContain("admob=api_unauthorized");
+    expect(logs).toMatch(/CREDENTIALS_MISSING/); expect(logs).toMatch(/www-authenticate=Bearer/);
+    expect(logs).toMatch(/tokeninfo: scopes=\[admob\.readonly,admob\.report\] expires_in=3599s audience_matches_client=true/);
+    expect(logs).not.toContain(ACCESS); expect(logs).not.toContain(SECRET_REFRESH); expect(logs).not.toContain(SECRET_CODE);
+  });
   it("never writes the authorization code, tokens or secrets to the log", async () => {
     const outs: string[] = [];
     for (const o of [{ tokenResponse: { error: "invalid_grant" }, tokenStatus: 400 }, { accounts: { status: 403, body: { error: { message: "x", details: [{ reason: "SERVICE_DISABLED" }] } } } }]) outs.push((await run(o)).logs);

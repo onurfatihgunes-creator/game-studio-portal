@@ -71,9 +71,27 @@ async function api<T>(accessToken: string, path: string, init?: RequestInit): Pr
     } catch { /* not JSON */ }
     // Google reports "API not enabled in the Cloud project" as 403 SERVICE_DISABLED / accessNotConfigured.
     const disabled = reason === "SERVICE_DISABLED" || reason === "ACCESS_NOT_CONFIGURED" || /has not been used in project|is disabled|accessNotConfigured/i.test(detail);
-    throw new AdMobError(`AdMob API ${res.status}: ${detail || res.statusText}`, res.status === 401 ? "reauthorize" : disabled ? "api_disabled" : res.status === 403 ? "forbidden" : "failed");
+    const wa = res.headers.get("www-authenticate");
+    throw new AdMobError(`AdMob API ${res.status}: ${detail || res.statusText}${reason ? ` [reason=${reason}]` : ""}${wa ? ` [www-authenticate=${wa.slice(0, 160)}]` : ""}`, res.status === 401 ? "reauthorize" : disabled ? "api_disabled" : res.status === 403 ? "forbidden" : "failed");
   }
   return (await res.json()) as T;
+}
+
+/**
+ * Failure diagnostics only: asks Google's tokeninfo endpoint what an access token is (scopes, lifetime, audience).
+ * Returns a short secret-free summary; the token itself is never returned or logged.
+ */
+export async function describeAccessToken(accessToken: string, clientId: string): Promise<string> {
+  const shape = `length=${accessToken.length}, ya29-prefix=${accessToken.startsWith("ya29.")}`;
+  try {
+    const res = await fetch("https://oauth2.googleapis.com/tokeninfo", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ access_token: accessToken }), cache: "no-store" });
+    const j = (await res.json()) as { error?: string; error_description?: string; scope?: string; expires_in?: string | number; aud?: string; azp?: string };
+    if (!res.ok || j.error) return `${shape}; tokeninfo: ${j.error ?? res.status}${j.error_description ? ` (${j.error_description})` : ""}`;
+    const scopes = (j.scope ?? "").split(" ").map((s) => s.split("/").pop()).join(",");
+    return `${shape}; tokeninfo: scopes=[${scopes}] expires_in=${j.expires_in}s audience_matches_client=${(j.aud ?? j.azp) === clientId}`;
+  } catch (e) {
+    return `${shape}; tokeninfo unavailable: ${e instanceof Error ? e.message : "error"}`;
+  }
 }
 
 export async function listPublisherIds(accessToken: string): Promise<string[]> {
